@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+megabot.db
+
+# Node
+node_modules/
+dist/
+coverage/
+.vite/
+
+# Config & Secret
+.env
+meta-config.yaml # Users should use the template
+api-credentials.py # Central API manager
+credentials/
+data/push_tokens.json
+megabot_memory.db
+*.db
+.megabot_index.json
+
+# Virtual environments
+venv/
+.env.local
+
+# Session files
+session-*.md
+
+# OS
+.DS_Store
+Thumbs.db
+megabot.egg-info/
+*.pyc
+__pycache__/
+.pytest_cache/

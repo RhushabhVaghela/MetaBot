@@ -1,0 +1,253 @@
+import sqlite3
+import json
+import logging
+from typing import List, Optional, Dict, Any
+import asyncio
+import concurrent.futures
+import threading
+
+logger = logging.getLogger("megabot.memory.knowledge")
+
+
+class KnowledgeMemoryManager:
+    """Manages general knowledge and learned lessons with advanced search capabilities."""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="knowledge_db"
+        )
+        self._local = threading.local()
+        self._init_tables()
+
+    def _init_tables(self):
+        """Initialize knowledge memory tables."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "PRAGMA journal_mode=WAL"
+            )  # Enable WAL mode for better concurrency
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memories (
+                    key TEXT PRIMARY KEY,
+                    type TEXT,
+                    content TEXT,
+                    tags TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_type ON memories(type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_key ON memories(key)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tags ON memories(tags)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_updated_at ON memories(updated_at)"
+            )
+
+    def _get_connection(self):
+        """Get thread-local database connection."""
+        if not hasattr(self._local, "conn"):
+            self._local.conn = sqlite3.connect(self.db_path)
+            self._local.conn.execute("PRAGMA journal_mode=WAL")  # Ensure WAL mode
+        return self._local.conn
+
+    async def write(
+        self, key: str, type: str, content: str, tags: Optional[List[str]] = None
+    ) -> str:
+        """Record new knowledge or decisions."""
+        tags_json = json.dumps(tags or [])
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                self._executor, self._sync_write, key, type, content, tags_json
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error writing memory: {e}")
+            return f"Error writing memory: {e}"
+
+    def _sync_write(self, key: str, type: str, content: str, tags_json: str):
+        """Synchronous write operation."""
+        conn = self._get_connection()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO memories (key, type, content, tags, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+            (key, type, content, tags_json),
+        )
+        conn.commit()
+
+    async def read(self, key: str) -> Optional[Dict[str, Any]]:
+        """Retrieve specific memory content by key."""
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                self._executor, self._sync_read, key
+            )
+        except Exception as e:
+            logger.error(f"Error reading memory '{key}': {e}")
+            return None
+
+    def _sync_read(self, key: str) -> Optional[Dict[str, Any]]:
+        """Synchronous read operation."""
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT * FROM memories WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "key": row[0],
+                "type": row[1],
+                "content": row[2],
+                "tags": json.loads(row[3]),
+                "created_at": row[4],
+                "updated_at": row[5],
+            }
+        return None
+
+    async def search(
+        self,
+        query: Optional[str] = None,
+        type: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        order_by: str = "updated_at DESC",
+    ) -> List[Dict[str, Any]]:
+        """Search for memories by query, type, or tags with advanced filtering."""
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                self._executor, self._sync_search, query, type, tags, limit, order_by
+            )
+        except Exception as e:
+            logger.error(f"Error searching memories: {e}")
+            return []
+
+    def _sync_search(
+        self,
+        query: Optional[str],
+        type: Optional[str],
+        tags: Optional[List[str]],
+        limit: Optional[int],
+        order_by: str,
+    ) -> List[Dict[str, Any]]:
+        """Synchronous search operation."""
+        sql = "SELECT * FROM memories WHERE 1=1"
+        params = []
+
+        if query:
+            sql += " AND (content LIKE ? OR key LIKE ?)"
+            params.extend([f"%{query}%", f"%{query}%"])
+
+        if type:
+            sql += " AND type = ?"
+            params.append(type)
+
+        sql += f" ORDER BY {order_by}"
+
+        if limit:
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        results = []
+        conn = self._get_connection()
+        cursor = conn.execute(sql, params)
+        for row in cursor.fetchall():
+            row_tags = json.loads(row[3])
+            # Filter by tags if provided
+            if tags and not all(tag in row_tags for tag in tags):
+                continue
+            results.append(
+                {
+                    "key": row[0],
+                    "type": row[1],
+                    "content": row[2],
+                    "tags": row_tags,
+                    "created_at": row[4],
+                    "updated_at": row[5],
+                }
+            )
+        return results
+
+    async def delete(self, key: str) -> bool:
+        """Delete a memory by key."""
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                self._executor, self._sync_delete, key
+            )
+        except Exception as e:
+            logger.error(f"Error deleting memory '{key}': {e}")
+            return False
+
+    def _sync_delete(self, key: str) -> bool:
+        """Synchronous delete operation."""
+        conn = self._get_connection()
+        cursor = conn.execute("DELETE FROM memories WHERE key = ?", (key,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    async def update_tags(self, key: str, tags: List[str]) -> bool:
+        """Update tags for an existing memory."""
+        tags_json = json.dumps(tags)
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                self._executor, self._sync_update_tags, key, tags_json
+            )
+        except Exception as e:
+            logger.error(f"Error updating tags for memory '{key}': {e}")
+            return False
+
+    def _sync_update_tags(self, key: str, tags_json: str) -> bool:
+        """Synchronous update tags operation."""
+        conn = self._get_connection()
+        conn.execute(
+            "UPDATE memories SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (tags_json, key),
+        )
+        conn.commit()
+        return True
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """View analytics on memory usage."""
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                self._executor, self._sync_get_stats
+            )
+        except Exception as e:
+            logger.error(f"Error getting memory stats: {e}")
+            return {"error": str(e)}
+
+    def _sync_get_stats(self) -> Dict[str, Any]:
+        """Synchronous get stats operation."""
+        conn = self._get_connection()
+        total = conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+        types = conn.execute(
+            "SELECT type, COUNT(*) FROM memories GROUP BY type"
+        ).fetchall()
+        recent = conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE updated_at >= datetime('now', '-7 days')"
+        ).fetchone()[0]
+        return {
+            "total_memories": total,
+            "by_type": dict(types),
+            "recent_updates": recent,
+        }
+
+    async def cleanup_old_memories(self, days_old: int = 365) -> int:
+        """Remove memories older than specified days (except critical ones)."""
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                self._executor, self._sync_cleanup_old_memories, days_old
+            )
+        except Exception as e:
+            logger.error(f"Error cleaning up old memories: {e}")
+            return 0
+
+    def _sync_cleanup_old_memories(self, days_old: int) -> int:
+        """Synchronous cleanup operation."""
+        conn = self._get_connection()
+        cursor = conn.execute(
+            """
+            DELETE FROM memories
+            WHERE updated_at < datetime('now', '-{} days')
+            AND type != 'learned_lesson'
+            """.format(days_old)
+        )
+        conn.commit()
+        return cursor.rowcount

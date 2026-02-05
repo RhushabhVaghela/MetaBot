@@ -1,0 +1,247 @@
+# MegaBot: Unified AI Orchestrator 🤖
+
+> MegaBot is a production-ready, local-first AI assistant that unifies the world's most powerful agentic frameworks into a single, secure, and modular brain.
+
+## Quick Start
+
+```bash
+git clone https://github.com/RhushabhVaghela/MegaBot
+cd MegaBot
+docker-compose up -d --build
+```
+
+## Key Features
+
+- **Unified Action Engine**: OpenClaw + MCP integration with 1000+ tools
+- **Neuro-Proactive Memory**: memU with hierarchical storage and intent prediction
+- **Multi-Channel Communication**: Telegram, Signal, Discord, WhatsApp, WebSocket
+- **Security First**: Human-in-the-loop approval for sensitive operations
+- **Visual Redaction**: Automatic detection and blurring of sensitive content
+- **Sovereign Identity**: Cross-platform chat history unification
+
+## Architecture
+
+### Core Components
+- **Orchestrator**: Central brain coordinating agents and adapters
+- **Memory System**: Three-tier storage (Working, Proactive, Persistent)
+- **Adapter Framework**: Standardized integrations for platforms and tools
+- **Security Layer**: Permission management and command sanitization
+- **Gateway Layer**: Multi-protocol network access (Cloudflare, Tailscale, Direct)
+
+### Technology Stack
+- **Backend**: Python 3.12+, FastAPI, AsyncIO
+- **Database**: SQLite + pgvector, PostgreSQL
+- **Messaging**: WebSocket, Platform APIs
+- **Security**: AES-256, JWT, Policy Engine
+- **Deployment**: Docker, Kubernetes
+
+## API Reference
+
+### REST Endpoints
+- `GET /health` - System health check
+- `POST /api/v1/messages/send` - Send messages
+- `GET /api/v1/messages/history/{chat_id}` - Message history
+- `POST /api/v1/security/approve/{id}` - Approve actions
+- `GET /api/v1/memory/stats` - Memory statistics
+
+### WebSocket API
+```javascript
+ws://localhost:18790/ws?token=<auth_token>
+// Message format: {"type": "message", "content": "..."}
+```
+
+## Configuration
+
+### Environment Variables
+```bash
+# Security
+MEGABOT_AUTH_TOKEN=your_secret_token
+OPENCLAW_AUTH_TOKEN=your_openclaw_token
+
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/db
+
+# LLM
+OLLAMA_MODEL=qwen2.5:14b
+
+# Adapters
+TELEGRAM_BOT_TOKEN=your_telegram_token
+SIGNAL_PHONE_NUMBER=+1234567890
+```
+
+### Configuration File (mega-config.yaml)
+```yaml
+orchestrator:
+  host: "0.0.0.0"
+  port: 8000
+  mode: "auto"
+
+adapters:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+  signal:
+    enabled: true
+    phone_number: "${SIGNAL_PHONE_NUMBER}"
+
+security:
+  default_policy: "prompt"
+  allowed_patterns: ["ls", "pwd"]
+  denied_patterns: ["rm -rf *"]
+```
+
+## Command Reference
+
+| Command | Description |
+|---------|-------------|
+| `!approve` | Authorize pending sensitive action |
+| `!deny` | Reject pending action |
+| `!allow <pattern>` | Permanently allow command pattern |
+| `!link <name>` | Link device to unified identity |
+| `!whoami` | Show current identity info |
+| `!backup` | Trigger memory backup |
+| `!health` | Check system status |
+| `!mode <mode>` | Switch modes (plan/build/ask/loki) |
+
+## Development
+
+### Project Structure
+```
+megabot/
+├── core/                 # Core business logic
+│   ├── orchestrator.py   # Main orchestrator
+│   ├── config.py         # Configuration
+│   └── memory/           # Memory systems
+├── adapters/             # Platform integrations
+│   ├── messaging/        # Chat platforms
+│   ├── gateway/          # Network access
+│   └── security/         # Security adapters
+├── features/             # Specialized features
+├── tests/                # Test suite
+└── docs/                 # Documentation
+```
+
+### Running Tests
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run all tests
+pytest --cov=core --cov=adapters
+
+# Run specific tests
+pytest tests/test_orchestrator.py
+```
+
+### Building Adapters
+```python
+from adapters.base import MessagingAdapter
+
+class MyAdapter(MessagingAdapter):
+    async def start(self) -> bool:
+        # Initialize connection
+        pass
+
+    async def send_message(self, message) -> bool:
+        # Send message logic
+        pass
+
+    async def receive_messages(self):
+        # Yield incoming messages
+        pass
+```
+
+## Security Model
+
+### Defense in Depth
+1. **Sandbox**: Docker container isolation
+2. **Firewall**: Command filtering and sanitization
+3. **Interlock**: Human approval for sensitive operations
+4. **Encryption**: End-to-end message encryption
+5. **Redaction**: Automatic sensitive content detection
+
+### Approval Workflows
+- File system operations require approval
+- Network commands need authorization
+- System administration commands are blocked by default
+- Visual content is automatically redacted
+
+## Deployment Options
+
+### Docker Compose (Recommended)
+```bash
+docker-compose up -d --build
+```
+
+### Kubernetes
+```bash
+kubectl apply -f k8s/
+```
+
+### Bare Metal
+```bash
+pip install -e .
+uvicorn core.orchestrator:app --host 0.0.0.0 --port 8000
+```
+
+## Monitoring & Maintenance
+
+### Health Checks
+```bash
+curl http://localhost:8000/health
+```
+
+### Logs
+```bash
+docker-compose logs -f megabot
+```
+
+### Backups
+```bash
+# Automated every 12 hours
+# Manual trigger: !backup command
+```
+
+## Troubleshooting
+
+### Common Issues
+- **Database connection failed**: Check PostgreSQL container
+- **Adapter not starting**: Verify API tokens and credentials
+- **High memory usage**: Check for memory leaks in adapters
+- **Slow responses**: Monitor LLM inference times
+
+### Debug Mode
+```bash
+# Enable debug logging
+export LOG_LEVEL=DEBUG
+docker-compose restart megabot
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
+
+### Code Standards
+- PEP 8 compliance
+- Type hints required
+- Comprehensive docstrings
+- Async/await for I/O operations
+- 100% test coverage target
+
+## License
+
+MIT License - see LICENSE file for details.
+
+## Support
+
+- **Documentation**: [docs/](docs/)
+- **Issues**: [GitHub Issues](https://github.com/RhushabhVaghela/MegaBot/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/RhushabhVaghela/MegaBot/discussions)
+
+---
+
+*Built for the era of private, agentic intelligence.*

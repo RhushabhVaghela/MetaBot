@@ -1,0 +1,84 @@
+system:
+  name: MegaBot
+  local_only: true
+  bind_address: "0.0.0.0" # Listen on all interfaces for Docker
+  telemetry: false
+  default_mode: "plan" # build, plan, architect, ask, debug
+
+adapters:
+  openclaw:
+    host: "127.0.0.1"
+    port: 18789
+    bridge_type: "websocket"
+    web_search:
+      active_provider: "searxng" # Options: searxng, perplexity, brave, google, tavily
+      providers:
+        searxng:
+          base_url: "http://searxng:8080"
+        perplexity:
+          api_key: "YOUR_PERPLEXITY_API_KEY"
+          model: "sonar-reasoning"
+        brave:
+          api_key: "YOUR_BRAVE_API_KEY"
+        google:
+          api_key: "YOUR_GOOGLE_API_KEY"
+          cx: "YOUR_CUSTOM_SEARCH_ENGINE_ID"
+        tavily:
+          api_key: "YOUR_TAVILY_API_KEY"
+  memu:
+    database_url: "sqlite:///megabot.db"
+    vector_db: "sqlite"
+  mcp:
+    servers:
+      - name: "filesystem"
+        command: "npx"
+        args: ["@modelcontextprotocol/server-filesystem", "/mnt/d/MegaBot"]
+      - name: "google-maps"
+        command: "npx"
+        args: ["@modelcontextprotocol/server-google-maps"]
+      
+      # Integration: Gmail and Google Calendar
+      - name: "google-services"
+        command: "npx"
+        args: ["@modelcontextprotocol/server-google-drive"]
+        env:
+          GOOGLE_CLIENT_ID: "YOUR_CLIENT_ID"
+          GOOGLE_CLIENT_SECRET: "YOUR_CLIENT_SECRET"
+
+      # Integration: Real Phone Calls
+      - name: "twilio-voice"
+        command: "npx"
+        args: ["@modelcontextprotocol/server-twilio"]
+        env:
+          TWILIO_ACCOUNT_SID: "YOUR_SID"
+          TWILIO_AUTH_TOKEN: "YOUR_TOKEN"
+          TWILIO_PHONE_NUMBER: "+1234567890"
+
+llm_profiles:
+  default:
+    provider: "ollama"
+    model: "llama3"
+    base_url: "http://127.0.0.1:11434/v1"
+  backup:
+    provider: "openai-compatible"
+    model: "local-model"
+    base_url: "http://127.0.0.1:1234/v1"
+
+paths:
+  external_repos: "/mnt/d/Agents and other repos/"
+
+policies:
+  allow:
+    - "git status"
+    - "ls"
+    - "dir"
+    - "npm list"
+  deny:
+    - "rm -rf"
+    - "format"
+    - "mkfs"
+    - "shutdown"
+
+admins:
+  - "your_phone_number_or_id" # Replace with your actual sender ID from WhatsApp/Telegram
+  - "admin-user"

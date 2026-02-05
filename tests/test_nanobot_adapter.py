@@ -1,0 +1,210 @@
+import pytest
+from unittest.mock import patch, MagicMock
+from adapters.nanobot_adapter import NanobotAdapter
+from core.interfaces import Message
+
+
+@pytest.mark.asyncio
+async def test_nanobot_adapter_initialization():
+    """Test NanobotAdapter initialization with mock fallback."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    # Should use mock fallback since nanobot isn't installed
+    assert adapter.market_analyzer is not None
+    assert adapter.routine_engine is not None
+    assert adapter.messenger is not None
+
+
+@pytest.mark.asyncio
+async def test_nanobot_adapter_initialization_with_installed_package():
+    """Test initialization when nanobot is available as installed package."""
+    mock_market_analyzer = MagicMock()
+    mock_routine_engine = MagicMock()
+    mock_messenger = MagicMock()
+
+    mock_nanobot_core = MagicMock()
+    mock_nanobot_core.MarketAnalyzer = MagicMock(return_value=mock_market_analyzer)
+    mock_nanobot_core.RoutineEngine = MagicMock(return_value=mock_routine_engine)
+    mock_nanobot_core.Messenger = MagicMock(return_value=mock_messenger)
+
+    with patch.dict("sys.modules", {"nanobot.core": mock_nanobot_core}):
+        adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+        # Should use real classes when import succeeds
+        assert adapter.market_analyzer is mock_market_analyzer
+        assert adapter.routine_engine is mock_routine_engine
+        assert adapter.messenger is mock_messenger
+
+
+@pytest.mark.asyncio
+async def test_nanobot_adapter_initialization_with_path_finding():
+    """Test initialization when nanobot is found via path searching."""
+    mock_market_analyzer = MagicMock()
+    mock_routine_engine = MagicMock()
+    mock_messenger = MagicMock()
+
+    mock_nanobot_core = MagicMock()
+    mock_nanobot_core.MarketAnalyzer = MagicMock(return_value=mock_market_analyzer)
+    mock_nanobot_core.RoutineEngine = MagicMock(return_value=mock_routine_engine)
+    mock_nanobot_core.Messenger = MagicMock(return_value=mock_messenger)
+
+    import_attempts = [0]  # Use list to modify from inner function
+
+    def mock_import_side_effect(name, *args, **kwargs):
+        if name == "nanobot.core" and import_attempts[0] < 1:
+            import_attempts[0] += 1
+            raise ImportError("No module named 'nanobot'")
+        elif name == "nanobot.core":
+            return mock_nanobot_core
+        return MagicMock()
+
+    with (
+        patch("sys.path") as mock_sys_path,
+        patch("os.path.exists", side_effect=lambda p: p == "/valid/path/src"),
+        patch("builtins.__import__", side_effect=mock_import_side_effect),
+    ):
+        adapter = NanobotAdapter("/valid/path", "telegram_token", "whatsapp_token")
+
+        # Should find path and use real classes
+        assert adapter.market_analyzer is mock_market_analyzer
+        assert adapter.routine_engine is mock_routine_engine
+        assert adapter.messenger is mock_messenger
+        assert adapter.nanobot_path == "/valid/path/src"
+
+
+@pytest.mark.asyncio
+async def test_nanobot_adapter_initialization_failure_fallback():
+    """Test initialization when MarketAnalyzer constructor fails."""
+    mock_nanobot_core = MagicMock()
+    mock_nanobot_core.MarketAnalyzer = MagicMock(side_effect=Exception("Init failed"))
+    mock_nanobot_core.RoutineEngine = MagicMock()
+    mock_nanobot_core.Messenger = MagicMock()
+
+    with patch.dict("sys.modules", {"nanobot.core": mock_nanobot_core}):
+        adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+        # Should use dummy fallback
+        assert hasattr(adapter.market_analyzer, "analyze_market")
+        assert hasattr(adapter.routine_engine, "run_routine")
+        assert hasattr(adapter.messenger, "send_telegram")
+        assert hasattr(adapter.messenger, "send_whatsapp")
+
+        # Test that dummy methods return error dicts
+        result = await adapter.analyze_market("TEST")
+        assert result == {"error": "Service unavailable"}
+
+        result = await adapter.run_routine("test_routine", {})
+        assert result == {"error": "Service unavailable"}
+
+        success = await adapter.messenger.send_telegram("123", "test")
+        assert success is False
+
+        success = await adapter.messenger.send_whatsapp("123", "test")
+        assert success is False
+
+
+@pytest.mark.asyncio
+async def test_send_message_unsupported_platform(capsys):
+    """Test sending message with unsupported platform."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    message = Message(
+        content="Hello",
+        sender="test_user",
+        metadata={"recipient": "unknown", "platform": "unknown"},
+    )
+
+    # Should not raise exception, just print warning
+    await adapter.send_message(message)
+
+    # Check that the warning was printed
+    captured = capsys.readouterr()
+    assert "Unsupported platform unknown or recipient unknown" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_send_message_whatsapp(capsys):
+    """Test sending message via WhatsApp."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    message = Message(
+        content="Hello WhatsApp",
+        sender="test_user",
+        metadata={"recipient": "+1234567890", "platform": "whatsapp"},
+    )
+
+    # Should not raise exception
+    await adapter.send_message(message)
+
+    # Check that the mock print happened
+    captured = capsys.readouterr()
+    assert "Mock WhatsApp: Sent 'Hello WhatsApp' to +1234567890" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_send_message_whatsapp_by_recipient_prefix(capsys):
+    """Test sending message via WhatsApp based on recipient prefix."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    message = Message(
+        content="Hello WhatsApp",
+        sender="test_user",
+        metadata={"recipient": "+1234567890", "platform": "unknown"},
+    )
+
+    # Should detect whatsapp from + prefix even with unknown platform
+    await adapter.send_message(message)
+
+    # Check that the mock print happened
+    captured = capsys.readouterr()
+    assert "Mock WhatsApp: Sent 'Hello WhatsApp' to +1234567890" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_receive_message():
+    """Test receiving message (mock implementation)."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    message = await adapter.receive_message()
+
+    assert isinstance(message, Message)
+    assert message.content == ""
+    assert message.sender == ""
+
+
+@pytest.mark.asyncio
+async def test_analyze_market():
+    """Test market analysis functionality."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    result = await adapter.analyze_market("AAPL")
+
+    assert isinstance(result, dict)
+    assert "symbol" in result or "error" in result
+
+
+@pytest.mark.asyncio
+async def test_run_routine():
+    """Test running routines."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    result = await adapter.run_routine("daily_report", {"symbol": "GOOGL"})
+
+    assert isinstance(result, dict)
+    assert "status" in result or "error" in result
+
+
+@pytest.mark.asyncio
+async def test_messenger_methods(capsys):
+    """Test messenger methods directly."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    # Test telegram send
+    await adapter.messenger.send_telegram("123", "test telegram")
+    captured = capsys.readouterr()
+    assert "Mock Telegram: Sent 'test telegram' to 123" in captured.out
+
+    # Test whatsapp send
+    await adapter.messenger.send_whatsapp("456", "test whatsapp")
+    captured = capsys.readouterr()
+    assert "Mock WhatsApp: Sent 'test whatsapp' to 456" in captured.out

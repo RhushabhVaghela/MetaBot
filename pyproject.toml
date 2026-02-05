@@ -1,0 +1,26 @@
+[project]
+name = "megabot"
+version = "0.1.0"
+description = "Unified AI assistant orchestrator"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml",
+    "pydantic",
+    "websockets",
+    "sqlalchemy",
+    "psycopg2-binary",
+    "pgvector",
+    "fastapi",
+    "uvicorn"
+]
+
+[tool.setuptools]
+packages = ["core", "adapters", "modules"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore:websockets.legacy is deprecated:DeprecationWarning",
+    "ignore:coroutine 'AsyncMockMixin._execute_mock_call' was never awaited:RuntimeWarning",
+]

@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database with pgvector for memU
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: megabot-postgres
+    environment:
+      POSTGRES_DB: megabot
+      POSTGRES_USER: megabot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-megabot_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U megabot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Ollama for local LLM inference
+  ollama:
+    image: ollama/ollama:latest
+    container_name: megabot-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # SearXNG meta-search engine
+  searxng:
+    image: searxng/searxng:latest
+    container_name: megabot-searxng
+    user: root
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - INSTANCE_NAME=megabot-search
+    restart: unless-stopped
+
+  # MegaBot orchestrator
+  megabot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: megabot-orchestrator
+    ports:
+      - "8000:8000"      # FastAPI REST API
+      - "18790:18790"    # WebSocket messaging server
+      - "5173:5173"      # Web UI (if applicable)
+    volumes:
+      - megabot_data:/app/data
+      - ./meta-config.yaml:/app/meta-config.yaml:ro
+      - megabot_media:/app/media
+      - megabot_logs:/app/logs
+      # Mount external repos (update paths as needed)
+      - "${MEMU_REPO_PATH:-./external/memU}:/app/external_repos/memU"
+      - "${OPENCLAW_REPO_PATH:-./external/openclaw}:/app/external_repos/openclaw"
+    environment:
+      # Python paths
+      PYTHONPATH: /app:/app/external_repos/memU/src:/app/external_repos/openclaw
+      MEGABOT_CONFIG_PATH: /app/meta-config.yaml
+      
+      # Database
+      DATABASE_URL: postgresql://megabot:${POSTGRES_PASSWORD:-megabot_dev_password}@postgres:5432/megabot
+      
+      # memU configuration
+      MEMU_OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:14b}
+      MEMU_PROACTIVE_MODE: "${MEMU_PROACTIVE_MODE:-true}"
+      
+      # Ollama endpoint
+      OLLAMA_HOST: http://ollama:11434
+      
+      # OpenClaw
+      OPENCLAW_AUTH_TOKEN: ${OPENCLAW_AUTH_TOKEN:-your_secret_token_here}
+      
+      # Security
+      MEGABOT_AUTH_TOKEN: ${MEGABOT_AUTH_TOKEN:-your_megabot_token_here}
+      DEFAULT_POLICY: ${DEFAULT_POLICY:-prompt}
+      
+      # Gateway options
+      ENABLE_CLOUDFLARE: "${ENABLE_CLOUDFLARE:-false}"
+      ENABLE_TAILSCALE: "${ENABLE_TAILSCALE:-false}"
+      
+      # Search
+      SEARXNG_URL: http://searxng:8080
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      searxng:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  megabot_data:
+    driver: local
+  postgres_data:
+    driver: local
+  ollama_data:
+    driver: local
+  megabot_media:
+    driver: local
+  megabot_logs:
+    driver: local

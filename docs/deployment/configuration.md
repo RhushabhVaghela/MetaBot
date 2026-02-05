@@ -1,0 +1,595 @@
+# Configuration Reference
+
+This document provides a comprehensive reference for all MegaBot configuration options available in `mega-config.yaml`.
+
+## Configuration File Structure
+
+MegaBot uses YAML format for configuration. The configuration file is loaded at startup and can be reloaded without restarting (where supported).
+
+```yaml
+# mega-config.yaml
+system:           # Core system settings
+adapters:         # Platform and service adapters
+policies:         # Security and permission policies
+paths:           # File system paths
+security:        # Security-related settings
+llm:            # Language model configuration
+admins:          # Administrator user IDs
+```
+
+## System Configuration
+
+### Core Settings
+
+```yaml
+system:
+  name: "MegaBot"                    # Bot display name
+  local_only: true                   # Restrict to localhost (recommended for security)
+  default_mode: "plan"               # Default AI mode: plan, build, ask, loki
+  bind_address: "127.0.0.1"         # Network bind address
+  port: 3000                        # Main API port
+  admin_phone: null                  # Phone number for voice escalation
+  dnd_start: 22                      # Do Not Disturb start hour (24h format)
+  dnd_end: 7                        # Do Not Disturb end hour (24h format)
+  telemetry: false                   # Enable anonymous usage telemetry
+  log_level: "INFO"                  # Logging level: DEBUG, INFO, WARNING, ERROR
+  max_concurrent_requests: 10        # Maximum concurrent API requests
+```
+
+### Telemetry Settings
+
+```yaml
+system:
+  telemetry:
+    enabled: false                   # Enable telemetry collection
+    endpoint: "https://telemetry.megabot.ai"  # Telemetry server
+    interval_minutes: 60             # Telemetry send interval
+    include_system_info: false       # Include system information
+    include_usage_stats: true        # Include usage statistics
+```
+
+## Adapter Configuration
+
+### OpenClaw Adapter
+
+```yaml
+adapters:
+  openclaw:
+    host: "127.0.0.1"               # OpenClaw server host
+    port: 18789                     # OpenClaw server port
+    database_url: "sqlite:///megabot.db"  # Database connection string
+    auth_token: ""                  # Authentication token (if required)
+    bridge_type: "websocket"        # Connection type: websocket, http
+    encryption_key: ""              # Encryption key for secure communication
+    reconnect_attempts: 5           # Number of reconnection attempts
+    reconnect_delay: 1.0            # Delay between reconnection attempts (seconds)
+    heartbeat_interval: 30          # Heartbeat interval (seconds)
+    request_timeout: 30             # Request timeout (seconds)
+```
+
+### MemU Adapter (Memory)
+
+```yaml
+adapters:
+  memu:
+    host: "127.0.0.1"               # MemU server host
+    port: 3000                      # MemU server port
+    database_url: "sqlite:///:memory:"  # In-memory SQLite (development)
+    # database_url: "postgresql://user:pass@localhost/memu"  # Production
+    auth_token: ""                  # Authentication token
+    bridge_type: "websocket"        # Connection type
+    encryption_key: ""              # Encryption key
+    vector_db: "sqlite"             # Vector database: sqlite, pgvector, pinecone
+    web_search:                     # Web search configuration
+      enabled: true
+      provider: "duckduckgo"        # Search provider: duckduckgo, google, bing
+      api_key: ""                   # API key for premium search
+      max_results: 10               # Maximum search results
+      cache_ttl: 3600               # Cache time-to-live (seconds)
+```
+
+### MCP (Model Context Protocol) Adapter
+
+```yaml
+adapters:
+  mcp:
+    host: "127.0.0.1"               # MCP server host
+    port: 3000                      # MCP server port
+    database_url: "sqlite:///mcp.db"  # MCP database
+    auth_token: ""                  # Authentication token
+    bridge_type: "websocket"        # Connection type
+    encryption_key: ""              # Encryption key
+    servers: []                     # List of MCP servers to connect
+      # Example server configuration:
+      # - name: "filesystem"
+      #   command: "npx"
+      #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+      #   env:
+      #     API_KEY: "${MCP_FILESYSTEM_KEY}"
+    vector_db: "pgvector"            # Vector database type
+    web_search: {}                   # Web search configuration (same as memu)
+```
+
+### Messaging Adapter
+
+```yaml
+adapters:
+  messaging:
+    host: "127.0.0.1"               # Messaging server host
+    port: 18790                     # Messaging server port
+    enable_encryption: true         # Enable end-to-end encryption
+    encryption_algorithm: "AES256"  # Encryption algorithm
+    max_message_size: 1048576       # Maximum message size (bytes)
+    rate_limit:                     # Rate limiting configuration
+      enabled: true
+      messages_per_minute: 60       # Messages per minute per user
+      burst_limit: 10               # Burst message limit
+    platforms:                      # Platform-specific configurations
+      telegram:
+        enabled: true
+        bot_token: "${TELEGRAM_BOT_TOKEN}"
+        webhook_url: null           # Webhook URL for production
+        max_file_size: 20971520     # 20MB max file size
+      discord:
+        enabled: false
+        bot_token: "${DISCORD_BOT_TOKEN}"
+        intents: ["guilds", "messages"]  # Discord intents
+      signal:
+        enabled: false
+        phone_number: "+1234567890"
+        device_name: "MegaBot"
+      slack:
+        enabled: false
+        bot_token: "${SLACK_BOT_TOKEN}"
+        signing_secret: "${SLACK_SIGNING_SECRET}"
+```
+
+### Unified Gateway
+
+```yaml
+adapters:
+  gateway:
+    host: "127.0.0.1"               # Gateway server host
+    port: 18791                     # Gateway server port
+    enable_cloudflare: false        # Enable Cloudflare tunnel
+    cloudflare_token: ""            # Cloudflare tunnel token
+    enable_vpn: false               # Enable VPN support
+    vpn_provider: "tailscale"       # VPN provider: tailscale, zerotier
+    vpn_auth_key: ""                # VPN authentication key
+    allowed_origins: ["*"]          # CORS allowed origins
+    rate_limiting:
+      enabled: true
+      requests_per_minute: 100      # Requests per minute
+      burst_limit: 20               # Burst request limit
+    ssl:
+      enabled: false                # Enable SSL/TLS
+      cert_file: "/path/to/cert.pem"  # SSL certificate file
+      key_file: "/path/to/key.pem"   # SSL private key file
+```
+
+## LLM Configuration
+
+### Provider Settings
+
+```yaml
+llm:
+  # Primary provider (used unless overridden)
+  provider: "anthropic"             # Default LLM provider
+
+  # Provider API keys (environment variables recommended)
+  anthropic_api_key: null
+  openai_api_key: null
+  groq_api_key: null
+  deepinfra_api_key: null
+  fireworks_api_key: null
+  gemini_api_key: null
+  sambanova_api_key: null
+  xai_api_key: null
+  perplexity_api_key: null
+  openrouter_api_key: null
+  mistral_api_key: null
+  cerebras_api_key: null
+  github_token: null                # For GitHub models
+
+  # Provider-specific settings
+  anthropic:
+    model: "claude-3-5-sonnet-20241022"
+    max_tokens: 4096
+    temperature: 0.7
+    timeout: 30
+
+  openai:
+    model: "gpt-4"
+    max_tokens: 4096
+    temperature: 0.7
+    timeout: 30
+
+  # Fallback providers (used if primary fails)
+  fallback_providers: ["openai", "groq"]
+```
+
+### Advanced LLM Settings
+
+```yaml
+llm:
+  # Request optimization
+  max_concurrent_requests: 5        # Maximum concurrent LLM requests
+  request_timeout: 60               # Request timeout (seconds)
+  retry_attempts: 3                 # Number of retry attempts
+  retry_delay: 1.0                  # Delay between retries (seconds)
+
+  # Response processing
+  max_response_length: 8192         # Maximum response length
+  truncate_long_responses: true     # Truncate long responses
+  include_reasoning: true           # Include reasoning in responses
+
+  # Caching
+  enable_caching: true              # Enable LLM response caching
+  cache_ttl: 3600                   # Cache time-to-live (seconds)
+  cache_max_size: 1000              # Maximum cache entries
+
+  # Cost management
+  max_daily_cost: 10.0              # Maximum daily cost (USD)
+  cost_alert_threshold: 5.0         # Cost alert threshold (USD)
+```
+
+## Security Configuration
+
+### Core Security Settings
+
+```yaml
+security:
+  megabot_backup_key: null          # Backup encryption key
+  megabot_encryption_salt: "megabot-static-salt"  # Encryption salt
+  megabot_media_path: "./media"     # Media storage path
+
+  # Content security
+  enable_content_filtering: true    # Enable content filtering
+  content_filter_level: "strict"    # Filtering level: lenient, moderate, strict
+
+  # Visual redaction
+  enable_image_redaction: true      # Enable automatic image redaction
+  redaction_sensitivity: "high"     # Redaction sensitivity: low, medium, high
+
+  # Network security
+  allowed_ips: []                   # IP whitelist (empty = allow all)
+  blocked_ips: []                   # IP blacklist
+  enable_ip_filtering: false        # Enable IP filtering
+
+  # Session security
+  session_timeout: 3600             # Session timeout (seconds)
+  max_sessions_per_user: 5          # Maximum concurrent sessions per user
+  enable_session_locking: true      # Lock sessions to IP address
+```
+
+### Permission System
+
+```yaml
+policies:
+  # Default permission level for all actions
+  default_permission: "ASK_EACH"    # AUTO, ASK_EACH, NEVER
+
+  # Whitelist policies (automatically allowed)
+  allow:
+    - "git status"
+    - "git log --oneline"
+    - "read *.md"
+    - "read *.txt"
+    - "ls -la"
+
+  # Blacklist policies (always blocked)
+  deny:
+    - "rm -rf /"
+    - "rm -rf /*"
+    - "sudo *"
+    - "chmod 777 *"
+    - "* > /dev/null"               # Prevent output redirection attacks
+    - "curl * | bash"               # Prevent pipe-to-shell attacks
+
+  # Advanced policies
+  time_restricted:                  # Time-based restrictions
+    - action: "shell.*"
+      allowed_hours: "9-17"         # 9 AM to 5 PM
+      weekdays_only: true
+
+  ip_restricted:                    # IP-based restrictions
+    - action: "admin.*"
+      allowed_ips: ["192.168.1.0/24"]
+```
+
+### Tirith Guard (Content Sanitization)
+
+```yaml
+security:
+  tirith_guard:
+    enabled: true                   # Enable content sanitization
+    ansi_escape_removal: true       # Remove ANSI escape sequences
+    unicode_normalization: true     # Normalize Unicode text
+    control_char_filtering: true    # Filter control characters
+    homoglyph_detection: true       # Detect suspicious homoglyphs
+    max_text_length: 10000          # Maximum text length
+    suspicious_chars_threshold: 0.1 # Threshold for suspicious character ratio
+```
+
+## Path Configuration
+
+### Directory Paths
+
+```yaml
+paths:
+  # Core directories
+  workspaces: "/home/user/megabot/workspaces"  # Project workspaces
+  external_repos: "/tmp/mock_repos"           # External repository cache
+  logs: "/var/log/megabot"                    # Log directory
+  temp: "/tmp/megabot"                        # Temporary files
+  backups: "/var/backups/megabot"             # Backup directory
+
+  # Data directories
+  databases: "/var/lib/megabot/db"            # Database files
+  cache: "/var/cache/megabot"                 # Cache directory
+  media: "/var/lib/megabot/media"             # Media storage
+
+  # Configuration directories
+  config_dir: "/etc/megabot"                  # Configuration directory
+  secrets_dir: "/etc/megabot/secrets"         # Secrets directory
+  ssl_certs: "/etc/megabot/ssl"               # SSL certificates
+```
+
+### File Permissions
+
+```yaml
+paths:
+  permissions:
+    workspaces: "755"               # Directory permissions
+    logs: "750"                     # Log directory permissions
+    secrets: "700"                  # Secrets directory permissions
+    databases: "600"                # Database file permissions
+    backups: "600"                  # Backup file permissions
+```
+
+## Advanced Configuration
+
+### Performance Tuning
+
+```yaml
+performance:
+  # Memory management
+  max_memory_usage: "2GB"           # Maximum memory usage
+  memory_cleanup_interval: 300      # Memory cleanup interval (seconds)
+  cache_max_size: 1000              # Maximum cache entries
+
+  # CPU management
+  max_worker_threads: 4             # Maximum worker threads
+  thread_pool_size: 10              # Thread pool size
+  cpu_affinity: null                # CPU affinity mask
+
+  # I/O optimization
+  io_buffer_size: 65536             # I/O buffer size (bytes)
+  max_file_handles: 1024            # Maximum open file handles
+  disk_cache_size: "1GB"            # Disk cache size
+
+  # Network optimization
+  connection_pool_size: 20          # Connection pool size
+  request_timeout: 30               # Request timeout (seconds)
+  keep_alive_timeout: 60            # Keep-alive timeout (seconds)
+```
+
+### Monitoring and Observability
+
+```yaml
+monitoring:
+  # Health checks
+  health_check_interval: 30         # Health check interval (seconds)
+  health_check_timeout: 5           # Health check timeout (seconds)
+  unhealthy_threshold: 3            # Unhealthy threshold
+
+  # Metrics collection
+  enable_metrics: true              # Enable metrics collection
+  metrics_port: 9090                # Metrics server port
+  metrics_path: "/metrics"          # Metrics endpoint path
+
+  # Logging
+  log_format: "json"                # Log format: json, text
+  log_rotation: "daily"             # Log rotation: daily, weekly, size
+  log_max_size: "100MB"             # Maximum log file size
+  log_retention_days: 30            # Log retention period
+
+  # Alerting
+  alerts:
+    enabled: true
+    slack_webhook: ""               # Slack webhook for alerts
+    email_recipients: []            # Email recipients for alerts
+    alert_levels: ["ERROR", "CRITICAL"]  # Alert levels
+```
+
+### Database Configuration
+
+```yaml
+database:
+  # Connection settings
+  connection_pool_size: 10          # Connection pool size
+  connection_timeout: 30            # Connection timeout (seconds)
+  max_connections: 20               # Maximum connections
+  connection_retry_attempts: 3      # Connection retry attempts
+  connection_retry_delay: 1.0       # Connection retry delay (seconds)
+
+  # Performance settings
+  enable_query_logging: false       # Enable query logging
+  slow_query_threshold: 1.0         # Slow query threshold (seconds)
+  enable_query_caching: true        # Enable query result caching
+  cache_ttl: 300                    # Query cache TTL (seconds)
+
+  # Backup settings
+  backup_enabled: true              # Enable automatic backups
+  backup_interval_hours: 12         # Backup interval (hours)
+  backup_retention_days: 30         # Backup retention (days)
+  backup_compression: "gzip"        # Backup compression: none, gzip, bz2
+  backup_encryption: true           # Encrypt backups
+```
+
+## Environment Variables
+
+MegaBot supports environment variable substitution in configuration files using the `${VAR_NAME}` syntax.
+
+### Common Environment Variables
+
+```bash
+# API Keys
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+export TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+
+# Database
+export DATABASE_URL="postgresql://user:password@localhost/megabot"
+
+# Security
+export MEGABOT_SECRET_ENCRYPTION_KEY="your-256-bit-key"
+export MEGABOT_SECRET_BACKUP_KEY="backup-encryption-key"
+
+# Platform-specific
+export DISCORD_BOT_TOKEN="your-discord-token"
+export SLACK_BOT_TOKEN="xoxb-your-slack-token"
+export CLOUDFLARE_TOKEN="your-cloudflare-token"
+```
+
+### Secret Management
+
+```bash
+# Load secrets from files
+export MEGABOT_SECRET_API_KEY="$(cat /etc/megabot/secrets/api_key)"
+export MEGABOT_SECRET_DB_PASSWORD="$(cat /etc/megabot/secrets/db_password)"
+
+# Use in configuration
+llm:
+  anthropic_api_key: "${MEGABOT_SECRET_API_KEY}"
+
+database:
+  password: "${MEGABOT_SECRET_DB_PASSWORD}"
+```
+
+## Configuration Validation
+
+### Schema Validation
+
+MegaBot validates configuration files against a JSON schema. Invalid configurations will prevent startup.
+
+```bash
+# Validate configuration
+python -c "
+from megabot.config import Config
+config = Config.from_yaml('mega-config.yaml')
+config.validate()
+print('Configuration is valid')
+"
+```
+
+### Common Validation Errors
+
+- **Missing required fields**: `admins` list cannot be empty in production
+- **Invalid API keys**: Keys must match expected format for each provider
+- **Invalid permissions**: Permission scopes must follow `category.action` format
+- **Invalid paths**: Directory paths must exist and be writable
+- **Port conflicts**: Ports must not be in use by other services
+
+### Configuration Hot Reload
+
+Some configuration changes can be applied without restarting MegaBot:
+
+```bash
+# Reload configuration via API
+curl -X POST http://localhost:3000/admin/reload-config \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+
+# Check reload status
+curl http://localhost:3000/admin/config-status
+```
+
+**Note**: Security-related changes (permissions, admins) require a full restart for security reasons.
+
+## Configuration Examples
+
+### Development Configuration
+
+```yaml
+system:
+  name: "MegaBot Dev"
+  local_only: true
+  log_level: "DEBUG"
+
+admins: ["dev_user_id"]
+
+llm:
+  anthropic_api_key: "${ANTHROPIC_API_KEY}"
+
+adapters:
+  openclaw:
+    database_url: "sqlite:///dev.db"
+  memu:
+    database_url: "sqlite:///:memory:"
+
+policies:
+  allow: ["*"]  # Permissive for development
+  deny: []
+```
+
+### Production Configuration
+
+```yaml
+system:
+  name: "MegaBot Production"
+  local_only: false
+  telemetry: false
+
+admins: ["admin_user_1", "admin_user_2"]
+
+llm:
+  anthropic_api_key: "${ANTHROPIC_API_KEY}"
+  fallback_providers: ["openai"]
+
+adapters:
+  openclaw:
+    database_url: "${DATABASE_URL}"
+  memu:
+    database_url: "${DATABASE_URL}"
+  messaging:
+    enable_encryption: true
+
+policies:
+  default_permission: "ASK_EACH"
+  allow: ["git status", "read *.md"]
+  deny: ["rm -rf /", "sudo *"]
+
+security:
+  enable_content_filtering: true
+  enable_image_redaction: true
+```
+
+### High-Security Configuration
+
+```yaml
+system:
+  local_only: true
+  dnd_start: 18  # 6 PM
+  dnd_end: 8     # 8 AM
+
+admins: ["security_admin"]
+
+policies:
+  default_permission: "NEVER"
+  allow: ["git status", "read *.md"]
+  deny: ["*"]
+
+security:
+  allowed_ips: ["192.168.1.0/24"]
+  enable_ip_filtering: true
+  enable_content_filtering: true
+  content_filter_level: "strict"
+  enable_image_redaction: true
+  redaction_sensitivity: "high"
+  tirith_guard:
+    enabled: true
+    homoglyph_detection: true
+```
+
+This configuration reference covers all available options. For specific use cases or advanced scenarios, refer to the deployment and security documentation.</content>
+<parameter name="filePath">docs/deployment/configuration.md

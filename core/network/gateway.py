@@ -1,0 +1,489 @@
+import asyncio
+import json
+import logging
+import subprocess
+import ssl
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+import websockets
+from websockets.legacy.server import WebSocketServerProtocol
+
+
+class ConnectionType(Enum):
+    CLOUDFLARE = "cloudflare"
+    VPN = "vpn"
+    DIRECT = "direct"
+    LOCAL = "local"
+
+
+@dataclass
+class ClientConnection:
+    websocket: Any
+    connection_type: ConnectionType
+    client_id: str
+    ip_address: str
+    connected_at: datetime
+    authenticated: bool = False
+    user_agent: Optional[str] = None
+    country: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "client_id": self.client_id,
+            "connection_type": self.connection_type.value,
+            "ip_address": self.ip_address,
+            "connected_at": self.connected_at.isoformat(),
+            "authenticated": self.authenticated,
+            "user_agent": self.user_agent,
+            "country": self.country,
+        }
+
+
+class UnifiedGateway:
+    def __init__(
+        self,
+        megabot_server_host: str = "127.0.0.1",
+        megabot_server_port: int = 18790,
+        enable_cloudflare: bool = False,
+        enable_vpn: bool = False,
+        enable_direct_https: bool = False,
+        cloudflare_tunnel_id: Optional[str] = None,
+        tailscale_auth_key: Optional[str] = None,
+        ssl_cert_path: Optional[str] = None,
+        ssl_key_path: Optional[str] = None,
+        public_domain: Optional[str] = None,
+        on_message: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        **kwargs,
+    ):
+        self.megabot_host = megabot_server_host
+        self.megabot_port = megabot_server_port
+        self.enable_cloudflare = enable_cloudflare
+        self.enable_vpn = enable_vpn
+        self.enable_direct_https = enable_direct_https
+        self.cloudflare_tunnel_id = cloudflare_tunnel_id
+        self.tailscale_auth_key = tailscale_auth_key
+        self.on_message = on_message
+        self.ssl_cert_path = ssl_cert_path
+        self.ssl_key_path = ssl_key_path
+        self.public_domain = public_domain
+
+        self.local_server = None
+        self.cloudflare_process: Optional[subprocess.Popen] = None
+        self.tailscale_process: Optional[subprocess.Popen] = None
+        self.https_server = None
+        self.clients: Dict[str, ClientConnection] = {}
+        self.health_status: Dict[str, bool] = {
+            ConnectionType.LOCAL.value: True,
+            ConnectionType.CLOUDFLARE.value: False,
+            ConnectionType.VPN.value: False,
+            ConnectionType.DIRECT.value: False,
+        }
+        self.rate_limits: Dict[str, Dict[str, List[datetime]]] = {
+            ct.value: {} for ct in ConnectionType
+        }
+        self.logger = logging.getLogger(__name__)
+
+    async def start(self):
+        await self._start_local_server()
+        if self.enable_cloudflare:
+            await self._start_cloudflare_tunnel()
+        if self.enable_vpn:
+            await self._start_tailscale_vpn()
+        if self.enable_direct_https:
+            await self._start_https_server()
+        # Fire-and-forget health monitor
+        asyncio.create_task(self._health_monitor_loop())
+
+    def get_connection_info(self) -> Dict[str, Any]:
+        return {
+            "health": dict(self.health_status),
+            "active_connections": len(self.clients),
+            "endpoints": {
+                "local": f"ws://{self.megabot_host}:{self.megabot_port}",
+                "cloudflare": self.health_status.get(ConnectionType.CLOUDFLARE.value),
+                "vpn": self.health_status.get(ConnectionType.VPN.value),
+                "direct": self.health_status.get(ConnectionType.DIRECT.value),
+            },
+        }
+
+    def _check_rate_limit(
+        self, conn: ClientConnection, limit: int = 1000, window: int = 60
+    ) -> bool:
+        try:
+            from adapters import unified_gateway as ug  # type: ignore
+
+            now_obj = ug.datetime.datetime.now()  # patched in tests
+        except Exception:
+            now_obj = datetime.now()
+
+        def _ts(val: Any) -> float:
+            try:
+                if hasattr(val, "timestamp"):
+                    return float(val.timestamp())
+                return float(val)
+            except Exception:
+                return datetime.now().timestamp()
+
+        limits = {
+            ConnectionType.LOCAL.value: (1000, 60),
+            ConnectionType.VPN.value: (500, 60),
+            ConnectionType.CLOUDFLARE.value: (100, 60),
+            ConnectionType.DIRECT.value: (100, 60),
+        }
+        limit, window = limits.get(conn.connection_type.value, (limit, window))
+        now_ts = _ts(now_obj)
+        rate_bucket = self.rate_limits.setdefault(conn.connection_type.value, {})
+        history = rate_bucket.setdefault(conn.client_id, [])
+        rate_bucket[conn.client_id] = [t for t in history if (now_ts - _ts(t)) < window]
+        if len(rate_bucket[conn.client_id]) >= limit:
+            return False
+        rate_bucket[conn.client_id].append(now_obj)
+        return True
+
+    async def _start_tailscale_vpn(self) -> bool:
+        if not self.tailscale_auth_key:
+            self.health_status[ConnectionType.VPN.value] = False
+            return False
+        try:
+            result = subprocess.run(
+                [
+                    "sudo",
+                    "tailscale",
+                    "up",
+                    "--authkey",
+                    self.tailscale_auth_key,
+                    "--hostname",
+                    "megabot-gateway",
+                ]
+            )
+            self.health_status[ConnectionType.VPN.value] = result.returncode == 0
+            return self.health_status[ConnectionType.VPN.value]
+        except Exception as exc:  # pragma: no cover - safety
+            self.logger.error("Tailscale start failed: %s", exc)
+            self.health_status[ConnectionType.VPN.value] = False
+            return False
+
+    async def _start_cloudflare_tunnel(self) -> bool:
+        if not self.cloudflare_tunnel_id:
+            self.health_status[ConnectionType.CLOUDFLARE.value] = False
+            return False
+        try:
+            check = subprocess.run(["cloudflared", "--version"])
+            if check.returncode != 0:
+                self.health_status[ConnectionType.CLOUDFLARE.value] = False
+                return False
+
+            self.cloudflare_process = subprocess.Popen(
+                [
+                    "cloudflared",
+                    "tunnel",
+                    "run",
+                    "--token",
+                    str(self.cloudflare_tunnel_id),
+                ]
+            )
+            if self.cloudflare_process.poll() is None:
+                self.health_status[ConnectionType.CLOUDFLARE.value] = True
+                return True
+            self.health_status[ConnectionType.CLOUDFLARE.value] = False
+            return False
+        except Exception as exc:
+            self.logger.error("Cloudflare start failed: %s", exc)
+            self.health_status[ConnectionType.CLOUDFLARE.value] = False
+            return False
+
+    async def _start_https_server(self):
+        try:
+            from aiohttp import web
+        except ImportError:
+            self.health_status[ConnectionType.DIRECT.value] = False
+            return None
+
+        ssl_context = None
+        try:
+            if self.ssl_cert_path and self.ssl_key_path:
+                ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                ssl_context.load_cert_chain(self.ssl_cert_path, self.ssl_key_path)
+        except Exception:
+            self.health_status[ConnectionType.DIRECT.value] = False
+            return None
+
+        try:
+            app = web.Application()
+            app.router.add_get("/ws", self._handle_https_websocket)
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(
+                runner,
+                self.megabot_host,
+                self.megabot_port + 1,
+                ssl_context=ssl_context,
+            )
+            await site.start()
+            self.https_server = runner
+            self.health_status[ConnectionType.DIRECT.value] = True
+            return runner
+        except Exception:
+            self.health_status[ConnectionType.DIRECT.value] = False
+            return None
+
+    async def _handle_https_websocket(self, request):
+        try:
+            from aiohttp import web
+        except ImportError:
+            return None
+
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        conn = ClientConnection(
+            websocket=ws,
+            connection_type=ConnectionType.DIRECT,
+            client_id=f"direct-{len(self.clients) + 1}",
+            ip_address=getattr(request, "remote", "unknown"),
+            connected_at=datetime.now(),
+        )
+        await self._manage_connection(conn)
+        return ws
+
+    def _detect_connection_type(self, websocket) -> ConnectionType:
+        headers = getattr(websocket, "request_headers", {}) or {}
+        ip = None
+        if "CF-Connecting-IP" in headers:
+            ip = headers.get("CF-Connecting-IP")
+            return ConnectionType.CLOUDFLARE
+        remote_address = getattr(websocket, "remote_address", None)
+        if remote_address and len(remote_address) >= 1:
+            ip = remote_address[0]
+            if ip.startswith("100.") or "Tailscale-User" in headers:
+                return ConnectionType.VPN
+            if ip.startswith("127.") or ip in {"::1", "localhost"}:
+                return ConnectionType.LOCAL
+        return ConnectionType.LOCAL
+
+    async def _handle_websocket(
+        self, websocket, path="", forced_type: Optional[ConnectionType] = None
+    ):
+        conn_type = forced_type or self._detect_connection_type(websocket)
+        ip = "unknown"
+        if getattr(websocket, "remote_address", None):
+            ip = websocket.remote_address[0]
+        headers = getattr(websocket, "request_headers", {}) or {}
+        ip = headers.get("CF-Connecting-IP", ip)
+        user_agent = headers.get("User-Agent", "unknown")
+
+        # Generate a more stable client_id using IP and User-Agent hash
+        import hashlib
+
+        client_hash = hashlib.md5(f"{ip}-{user_agent}".encode()).hexdigest()[:8]
+        client_id = f"{conn_type.value}-{client_hash}"
+
+        conn = ClientConnection(
+            websocket=websocket,
+            connection_type=conn_type,
+            client_id=client_id,
+            ip_address=ip,
+            connected_at=datetime.now(),
+            user_agent=user_agent,
+        )
+        await self._manage_connection(conn)
+
+    async def _manage_connection(self, conn: ClientConnection):
+        self.clients[conn.client_id] = conn
+        ws = conn.websocket
+        try:
+            async for message in ws:
+                payload = message
+                try:
+                    from aiohttp import WSMsgType  # type: ignore
+                except Exception:
+                    WSMsgType = None  # type: ignore
+
+                if hasattr(message, "type"):
+                    msg_type = getattr(message, "type", None)
+                    if WSMsgType and msg_type == WSMsgType.ERROR:
+                        break
+                    if WSMsgType and msg_type == WSMsgType.TEXT:
+                        payload = getattr(message, "data", message)
+                    elif hasattr(message, "data"):
+                        payload = message.data
+
+                if isinstance(payload, bytes):
+                    try:
+                        payload = payload.decode("utf-8", errors="ignore")
+                    except Exception:
+                        payload = str(payload)
+                if not isinstance(payload, (str, bytes)):
+                    payload = str(payload)
+
+                if not self._check_rate_limit(conn):
+                    await self._send_error(conn, "Rate limit exceeded")
+                    continue
+                await self._process_message(conn, payload)
+        finally:
+            self.clients.pop(conn.client_id, None)
+            close_fn = getattr(ws, "close", None)
+            if asyncio.iscoroutinefunction(close_fn):
+                await close_fn()
+            elif callable(close_fn):
+                close_fn()
+
+    async def _process_message(self, conn: ClientConnection, raw_message: Any):
+        if isinstance(raw_message, bytes):
+            try:
+                raw_message = raw_message.decode("utf-8", errors="ignore")
+            except Exception:
+                raw_message = ""
+        try:
+            data = json.loads(raw_message)
+            data.setdefault(
+                "_meta",
+                {
+                    "connection_type": conn.connection_type.value,
+                    "client_id": conn.client_id,
+                    "ip_address": conn.ip_address,
+                    "authenticated": conn.authenticated,
+                },
+            )
+            await self._forward_to_megabot(data)
+        except json.JSONDecodeError:
+            await self._send_error(conn, "Invalid JSON")
+        except Exception:
+            await self._send_error(conn, "Internal error")
+
+    async def _forward_to_megabot(self, data: Dict[str, Any]):
+        if self.on_message:
+            await self.on_message(data)
+
+    async def _send_error(self, conn: ClientConnection, message: str):
+        payload = json.dumps({"error": message})
+        ws = conn.websocket
+        if hasattr(ws, "send"):
+            try:
+                await ws.send(payload)
+                return
+            except Exception:
+                pass
+        if hasattr(ws, "send_str"):
+            try:
+                await ws.send_str(payload)
+            except Exception:
+                pass
+
+    async def _start_local_server(self):
+        def process_request(_connection: WebSocketServerProtocol, request):
+            host = (
+                request.headers.get("Host", "") if hasattr(request, "headers") else ""
+            )
+            if not any(h in host for h in ["127.0.0.1", "localhost", "::1"]):
+                return (403, [], b"Localhost only")
+            return None
+
+        self.local_server = await websockets.serve(
+            self._handle_websocket,
+            self.megabot_host,
+            self.megabot_port,
+            process_request=process_request,
+        )
+        return self.local_server
+
+    async def send_message(self, client_id: str, message: Dict[str, Any]) -> bool:
+        """Send a message back to a specific connected client"""
+        if client_id not in self.clients:
+            self.logger.warning(f"Attempted to send to unknown client: {client_id}")
+            return False
+
+        conn = self.clients[client_id]
+        try:
+            payload = json.dumps(message)
+            if hasattr(conn.websocket, "send"):
+                await conn.websocket.send(payload)
+            elif hasattr(conn.websocket, "send_str"):
+                await conn.websocket.send_str(payload)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to send to gateway client {client_id}: {e}")
+            return False
+
+    async def _health_monitor_loop(self):
+        while True:
+            if self.enable_cloudflare:
+                if (
+                    self.cloudflare_process is None
+                    or self.cloudflare_process.poll() is not None
+                ):
+                    self.health_status[ConnectionType.CLOUDFLARE.value] = False
+                    self.logger.warning(
+                        "Cloudflare tunnel dead or not started. Reconnecting..."
+                    )
+                    try:
+                        await self._start_cloudflare_tunnel()
+                    except Exception as e:
+                        self.logger.error(f"Cloudflare reconnection failed: {e}")
+                else:
+                    self.health_status[ConnectionType.CLOUDFLARE.value] = True
+
+            if self.enable_vpn:
+                try:
+                    result = subprocess.run(["tailscale", "status"])
+                    if result.returncode != 0:
+                        self.health_status[ConnectionType.VPN.value] = False
+                    else:
+                        self.health_status[ConnectionType.VPN.value] = True
+                except Exception:
+                    self.health_status[ConnectionType.VPN.value] = False
+            await asyncio.sleep(5)
+
+    async def stop(self):
+        # Close client websockets
+        for conn in list(self.clients.values()):
+            ws = conn.websocket
+            if hasattr(ws, "close"):
+                try:
+                    if asyncio.iscoroutinefunction(ws.close):
+                        await ws.close()
+                    else:
+                        ws.close()
+                except Exception:
+                    pass
+        self.clients.clear()
+
+        if self.local_server:
+            try:
+                self.local_server.close()
+                await self.local_server.wait_closed()
+            except Exception:
+                pass
+
+        if self.cloudflare_process:
+            try:
+                self.cloudflare_process.terminate()
+            except Exception:
+                pass
+
+        if self.tailscale_process:
+            try:
+                self.tailscale_process.terminate()
+            except Exception:
+                pass
+
+        if self.https_server and hasattr(self.https_server, "cleanup"):
+            try:
+                await self.https_server.cleanup()
+            except Exception:
+                pass
+
+
+def _main():  # pragma: no cover - invoked in tests via run_module
+    logging.basicConfig(level=logging.INFO)
+    gateway = UnifiedGateway()
+    try:
+        asyncio.run(gateway.start())
+    finally:
+        asyncio.run(gateway.stop())
+
+
+if __name__ == "__main__":  # pragma: no cover
+    _main()

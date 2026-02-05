@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  megabot:
+    build: .
+    container_name: megabot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "18790:18790"
+    volumes:
+      - ./megabot_memory.db:/app/megabot_memory.db
+      - ./backups:/app/backups
+      - ./media:/app/media
+      - ./api-credentials.py:/app/api-credentials.py
+      - ./mega-config.yaml:/app/mega-config.yaml
+    environment:
+      - MEGABOT_BACKUP_KEY=${MEGABOT_BACKUP_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENCLAW_AUTH_TOKEN=${OPENCLAW_AUTH_TOKEN}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_FROM_NUMBER=${TWILIO_FROM_NUMBER}
