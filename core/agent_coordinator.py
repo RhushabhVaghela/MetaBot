@@ -1,6 +1,8 @@
 import re
 import json
 import os
+import errno
+import stat as _stat
 import tempfile
 from datetime import datetime
 from typing import Dict, Any
@@ -200,7 +202,8 @@ class AgentCoordinator:
                 except Exception:
                     return False, "Path resolution error"
 
-                # Deny symlinks explicitly
+                # Deny symlinks explicitly (fast path). We'll also perform
+                # lstat checks later to guard against TOCTOU races.
                 if candidate.is_symlink():
                     return False, "Symlink paths are not allowed"
 
@@ -213,10 +216,18 @@ class AgentCoordinator:
             except Exception as e:
                 return False, f"Path validation error: {e}"
 
+        def _safe_lstat(path_str: str):
+            try:
+                return os.lstat(path_str)
+            except FileNotFoundError:
+                return None
+            except Exception:
+                return None
+
         # Implement a few example tools with improved security
-        try:
-            if tool_name == "read_file":
-                path = str(tool_input.get("path", ""))
+            try:
+                if tool_name == "read_file":
+                    path = str(tool_input.get("path", ""))
 
                 # If a relative path is supplied, try opening it as-is first.
                 # Tests often patch builtins.open for a relative path; attempting
@@ -238,14 +249,79 @@ class AgentCoordinator:
                 if not ok:
                     return f"Security Error: read_file denied: {info}"
 
-                # Enforce read limit
+                # Enforce read limit and mitigate TOCTOU by using lstat and
+                # O_NOFOLLOW when available. We capture a pre-open lstat and
+                # verify the file hasn't changed after opening.
                 resolved = info
-                size = os.path.getsize(resolved)
-                if size > self.READ_LIMIT:
-                    return f"Security Error: read_file denied: file too large ({size} bytes)"
+                pre_stat = _safe_lstat(resolved)
 
-                with open(resolved, "r", encoding="utf-8", errors="replace") as f:
-                    return f.read()
+                flags = os.O_RDONLY
+                use_no_follow = hasattr(os, "O_NOFOLLOW")
+                if use_no_follow:
+                    flags |= os.O_NOFOLLOW
+
+                try:
+                    # Try an fd-based open that does not follow symlinks when
+                    # supported. This prevents a symlink from being followed at
+                    # open time (TOCTOU mitigation).
+                    fd = os.open(resolved, flags)
+                except OSError as e:
+                    # If O_NOFOLLOW caused an ELOOP (symlink) or is not
+                    # supported, return a clear error rather than falling
+                    # through to a potentially unsafe open.
+                    if e.errno in (errno.ELOOP, errno.EPERM, errno.EACCES):
+                        return f"Security Error: read_file denied: possible symlink or permission error ({e})"
+                    # Fallback to safe builtin open as last resort
+                    try:
+                        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                            data = f.read()
+                            if len(data.encode("utf-8")) > self.READ_LIMIT:
+                                return f"Security Error: read_file denied: file too large ({len(data.encode('utf-8'))} bytes)"
+                            return data
+                    except Exception as e2:
+                        return f"Security Error: read_file denied: {e2}"
+
+                try:
+                    post_stat = os.fstat(fd)
+                    # If file existed before and its identity changed -> abort
+                    if pre_stat is not None and (
+                        pre_stat.st_ino != post_stat.st_ino
+                        or pre_stat.st_dev != post_stat.st_dev
+                    ):
+                        os.close(fd)
+                        return "Security Error: read_file denied: TOCTOU detected"
+
+                    # enforce size limit
+                    try:
+                        size = post_stat.st_size
+                        if size > self.READ_LIMIT:
+                            os.close(fd)
+                            return f"Security Error: read_file denied: file too large ({size} bytes)"
+                    except Exception:
+                        pass
+
+                    # Read file content
+                    chunks = []
+                    remaining = post_stat.st_size if hasattr(post_stat, "st_size") else None
+                    # Read in chunks to avoid large allocations
+                    while True:
+                        chunk = os.read(fd, 64 * 1024)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        if remaining is not None:
+                            remaining -= len(chunk)
+                            if remaining <= 0:
+                                break
+                    data = b"".join(chunks).decode("utf-8", errors="replace")
+                    os.close(fd)
+                    return data
+                except Exception as e:
+                    try:
+                        os.close(fd)
+                    except Exception:
+                        pass
+                    return f"Security Error: read_file denied: {e}"
             elif tool_name == "write_file":
                 path = str(tool_input.get("path", ""))
                 content = str(tool_input.get("content", ""))
@@ -257,10 +333,44 @@ class AgentCoordinator:
                 resolved = Path(info)
                 parent_dir = resolved.parent
                 parent_dir.mkdir(parents=True, exist_ok=True)
+
+                # Capture pre-write lstat for TOCTOU checks
+                pre_stat = _safe_lstat(str(resolved))
+
                 fd, tmp_path = tempfile.mkstemp(dir=str(parent_dir))
                 try:
                     with os.fdopen(fd, "w", encoding="utf-8") as tf:
                         tf.write(content)
+
+                    # Re-check lstat on destination before replacing. If the
+                    # destination appeared or changed between our pre-check and
+                    # now, abort to avoid overwriting symlinks or unexpected
+                    # files (TOCTOU mitigation).
+                    post_stat = _safe_lstat(str(resolved))
+                    if post_stat is not None:
+                        # If destination is a symlink -> deny
+                        try:
+                            if _stat.S_ISLNK(post_stat.st_mode):
+                                try:
+                                    os.unlink(tmp_path)
+                                except Exception:
+                                    pass
+                                return "Security Error: write_file denied: destination is a symlink"
+                        except Exception:
+                            pass
+
+                        # If pre-existed and identity changed -> abort
+                        if pre_stat is not None and (
+                            pre_stat.st_ino != post_stat.st_ino
+                            or pre_stat.st_dev != post_stat.st_dev
+                        ):
+                            try:
+                                os.unlink(tmp_path)
+                            except Exception:
+                                pass
+                            return "Security Error: write_file denied: TOCTOU detected"
+
+                    # If checks pass, atomically replace
                     os.replace(tmp_path, str(resolved))
                 except Exception as e:
                     try:
