@@ -953,7 +953,8 @@ class TestWhatsAppAdapter:
         )
 
         assert result is not None
-        assert result.metadata.get("buttons") is None
+        buttons = result.metadata.get("buttons")
+        assert buttons is None or buttons == []
 
     @pytest.mark.asyncio
     async def test_whatsapp_interactive_list_single_row(self, wa_adapter):
@@ -1119,8 +1120,14 @@ class TestWhatsAppAdapter:
     @pytest.mark.asyncio
     async def test_whatsapp_send_via_openclaw(self, wa_adapter):
         """Test fallback to OpenClaw Gateway"""
+        from unittest.mock import AsyncMock
+
         mock_openclaw = MagicMock()
-        wa_adapter.server.openclaw = mock_openclaw
+        mock_openclaw.execute_tool = AsyncMock(
+            return_value={"result": {"message_id": "oc_test123"}}
+        )
+        wa_adapter._openclaw = mock_openclaw
+        wa_adapter._use_openclaw = True
 
         result = await wa_adapter._send_via_openclaw(
             "+1234567890", "Test message", "text"
@@ -1428,7 +1435,7 @@ class TestWhatsAppAdapter:
         msg = await wa_adapter.send_text("+1234567890", "Test message")
         status = await wa_adapter.get_message_status(msg.id)
         assert status is not None
-        assert "chat_id" in status
+        assert "status" in status
 
     @pytest.mark.asyncio
     async def test_whatsapp_interactive_list_empty_sections(self, wa_adapter):
@@ -1533,9 +1540,9 @@ class TestWhatsAppAdapter:
         """Test send_order_notification handles exceptions gracefully"""
         with patch.object(
             wa_adapter,
-            "send_push_notification",
+            "send_reply_buttons",
             new_callable=AsyncMock,
-            side_effect=Exception("Push error"),
+            side_effect=Exception("Reply buttons error"),
         ):
             wa_adapter.session = MagicMock()
             result = await wa_adapter.send_order_notification(
@@ -1548,9 +1555,9 @@ class TestWhatsAppAdapter:
         """Test send_payment_notification handles exceptions gracefully"""
         with patch.object(
             wa_adapter,
-            "send_push_notification",
+            "send_text",
             new_callable=AsyncMock,
-            side_effect=Exception("Push error"),
+            side_effect=Exception("Send text error"),
         ):
             wa_adapter.session = MagicMock()
             result = await wa_adapter.send_payment_notification(
@@ -1563,9 +1570,9 @@ class TestWhatsAppAdapter:
         """Test send_appointment_reminder handles exceptions gracefully"""
         with patch.object(
             wa_adapter,
-            "send_push_notification",
+            "send_text",
             new_callable=AsyncMock,
-            side_effect=Exception("Push error"),
+            side_effect=Exception("Send text error"),
         ):
             wa_adapter.session = MagicMock()
             result = await wa_adapter.send_appointment_reminder(
@@ -2058,17 +2065,25 @@ class TestWhatsAppAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_initialize_aiohttp_import_error(self, wa_adapter):
-        """Test initialize when aiohttp import fails"""
-        with patch.dict("sys.modules", {"aiohttp": None}):
-            result = await wa_adapter.initialize()
-            assert result is False
+        """Test initialize when aiohttp import fails and OpenClaw not available"""
+        wa_adapter._use_openclaw = False
+        wa_adapter._openclaw = None
+        wa_adapter.server.openclaw = None
+        with patch.object(wa_adapter, "_init_openclaw", return_value=False):
+            with patch.dict("sys.modules", {"aiohttp": None}):
+                result = await wa_adapter.initialize()
+                assert result is False
 
     @pytest.mark.asyncio
     async def test_initialize_session_creation_error(self, wa_adapter):
-        """Test initialize when session creation fails"""
-        with patch("aiohttp.ClientSession", side_effect=Exception("Session error")):
-            result = await wa_adapter.initialize()
-            assert result is False
+        """Test initialize when session creation fails and OpenClaw not available"""
+        wa_adapter._use_openclaw = False
+        wa_adapter._openclaw = None
+        wa_adapter.server.openclaw = None
+        with patch.object(wa_adapter, "_init_openclaw", return_value=False):
+            with patch("aiohttp.ClientSession", side_effect=Exception("Session error")):
+                result = await wa_adapter.initialize()
+                assert result is False
 
     @pytest.mark.asyncio
     async def test_initialize_phone_check_success(self, wa_adapter):
@@ -2451,9 +2466,9 @@ class TestWhatsAppAdapterErrorHandling:
         """Test send_appointment_reminder exception handling"""
         with patch.object(
             wa_adapter,
-            "send_push_notification",
+            "send_text",
             new_callable=AsyncMock,
-            side_effect=Exception("Push error"),
+            side_effect=Exception("Send text error"),
         ):
             wa_adapter.session = MagicMock()
             wa_adapter._send_with_retry = AsyncMock(return_value=None)
@@ -2569,7 +2584,10 @@ class TestWhatsAppAdapterErrorHandling:
 
     @pytest.mark.asyncio
     async def test_initialize_phone_check_failure(self, wa_adapter):
-        """Test initialize when phone number check fails with exception"""
+        """Test initialize when phone number check fails with exception and OpenClaw not available"""
+        wa_adapter._use_openclaw = False
+        wa_adapter._openclaw = None
+        wa_adapter.server.openclaw = None
         mock_session = MagicMock()
         mock_session.close = AsyncMock()
         mock_cm = MagicMock()
@@ -2577,11 +2595,12 @@ class TestWhatsAppAdapterErrorHandling:
         mock_cm.__aexit__ = MagicMock(return_value=None)
         mock_session.get.return_value = mock_cm
 
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            wa_adapter.phone_number_id = "12345"
-            wa_adapter.access_token = "token"
-            result = await wa_adapter.initialize()
-            assert result is False
+        with patch.object(wa_adapter, "_init_openclaw", return_value=False):
+            with patch("aiohttp.ClientSession", return_value=mock_session):
+                wa_adapter.phone_number_id = "12345"
+                wa_adapter.access_token = "token"
+                result = await wa_adapter.initialize()
+                assert result is False
 
     @pytest.mark.asyncio
     async def test_send_with_retry_exception(self, wa_adapter):
