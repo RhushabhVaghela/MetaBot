@@ -101,7 +101,7 @@ class AdminHandler:
         return False
 
     async def _handle_approve(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle approval commands."""
         action_id = (
@@ -115,7 +115,7 @@ class AdminHandler:
         return False
 
     async def _handle_reject(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle rejection commands."""
         action_id = (
@@ -129,7 +129,7 @@ class AdminHandler:
         return False
 
     async def _handle_allow(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle allow policy commands."""
         if len(parts) > 1:
@@ -144,7 +144,7 @@ class AdminHandler:
         return False
 
     async def _handle_deny(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle deny policy commands."""
         if len(parts) > 1:
@@ -159,9 +159,8 @@ class AdminHandler:
         return False
 
     async def _handle_policies(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
-        """Handle policies display command."""
         resp_text = f"Policies:\nAllow: {self.orchestrator.config.policies['allow']}\nDeny: {self.orchestrator.config.policies['deny']}"
         resp = Message(
             content=resp_text, sender="System", metadata={"chat_id": chat_id}
@@ -170,7 +169,7 @@ class AdminHandler:
         return True
 
     async def _handle_mode(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle mode switching commands."""
         if len(parts) > 1:
@@ -184,7 +183,7 @@ class AdminHandler:
         return False
 
     async def _handle_history_clean(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle history cleaning commands."""
         target_chat = parts[1] if len(parts) > 1 else chat_id
@@ -201,7 +200,7 @@ class AdminHandler:
         return False
 
     async def _handle_link(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle identity linking commands."""
         if len(parts) > 1:
@@ -222,7 +221,7 @@ class AdminHandler:
         return False
 
     async def _handle_whoami(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle identity query commands."""
         unified = await self.orchestrator.memory.get_unified_id(platform, sender_id)
@@ -238,7 +237,7 @@ class AdminHandler:
         return True
 
     async def _handle_backup(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle backup commands."""
         res = await self.orchestrator.memory.backup_database()
@@ -251,7 +250,7 @@ class AdminHandler:
         return True
 
     async def _handle_briefing(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle voice briefing commands."""
         admin_phone = getattr(self.orchestrator.config.system, "admin_phone", None)
@@ -268,7 +267,7 @@ class AdminHandler:
             return True
 
         asyncio.create_task(
-            self._trigger_voice_briefing(admin_phone, str(chat_id), platform)
+            self._trigger_voice_briefing(admin_phone, chat_id or "", platform)
         )
         resp = Message(
             content="📞 Voice briefing initiated. Expect a call shortly.",
@@ -282,7 +281,7 @@ class AdminHandler:
         return True
 
     async def _handle_rag_rebuild(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle RAG rebuild commands."""
         await self.orchestrator.rag.build_index(force_rebuild=True)
@@ -295,7 +294,7 @@ class AdminHandler:
         return True
 
     async def _handle_health(
-        self, parts: list, sender_id: str, chat_id: str, platform: str
+        self, parts: list, sender_id: str, chat_id: Optional[str], platform: str
     ) -> bool:
         """Handle health check commands."""
         health = await self.orchestrator.health_monitor.get_system_health()
