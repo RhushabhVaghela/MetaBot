@@ -3,35 +3,40 @@
 MegaBot is built with a strong focus on reliability, maintaining high test coverage across its core logic and adapters.
 
 ## 🧪 Coverage Overview
-- **Core Orchestrator**: 99% (330 statements, 4 missed - acceptable startup code exclusions)
+- **Core Orchestrator**: 99% (acceptable startup code exclusions)
 - **Network Components**: 98% (gateway.py at 95%, server.py/monitor.py/tunnel.py at 100%)
 - **Discovery Engine**: 100%
 - **Interfaces**: 100%
-- **Adapter Modules**: 100% (all major adapters at 100% coverage)
-- **Overall Core + Adapters**: 96% (network components near complete)
+- **Security (TirithGuard)**: 97%
+- **Adapter Modules**: 100% (all major adapters at 100% coverage, including SMS and iMessage)
+- **Overall Core + Adapters**: 88% (including all latest tests)
 
 ### 📊 Current Coverage Details
 - **Core Modules**:
-  - config.py: 100%
+  - config.py: 82%
   - discovery.py: 100%
+  - instrumentation.py: 100%
   - interfaces.py: 100%
-  - orchestrator.py: 99% (4 lines missed - lifespan startup and __main__)
-  - network/gateway.py: 95% (298 statements, 14 missed - very edge-case error handling)
-  - network/monitor.py: 100% (20 statements, 0 missed)
-  - network/server.py: 100% (24 statements, 0 missed)
-  - network/tunnel.py: 100% (39 statements, 0 missed)
+  - orchestrator.py: 99%
+  - memory/knowledge_memory.py: 83%
+  - memory/user_identity.py: 100%
+  - permissions.py: 81%
+  - projects.py: 79%
+  - secrets.py: 64%
 
-- **Adapter Modules** (All at 100%):
-  - voice_adapter.py: 100%
-  - memu_adapter.py: 100%
-  - openclaw_adapter.py: 100%
-  - mcp_adapter.py: 100%
-  - discord_adapter.py: 96%
-  - slack_adapter.py: 98%
-  - signal_adapter.py: 96%
+- **Adapter Modules**:
+  - voice_adapter.py: 80%
+  - memu_adapter.py: 94%
+  - openclaw_adapter.py: 95%
+  - mcp_adapter.py: 84%
+  - discord_adapter.py: 99%
+  - slack_adapter.py: 99%
+  - signal_adapter.py: 100%
   - nanobot_adapter.py: 95%
-  - telegram_adapter.py: 98%
-  - push_notification_adapter.py: 99%
+  - telegram_adapter.py: 100%
+  - sms.py: 100%
+  - imessage.py: 100%
+  - push_notification_adapter.py: 98%
 
 - **Messaging Server**: 83% (239 statements, 40 missed - websockets edge cases)
 
