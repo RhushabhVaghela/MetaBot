@@ -42,10 +42,18 @@ jobs:
           python -m pip install pytest ruff mypy
 
       - name: Run tests
-        run: python -m pytest -q
+        run: |
+          python -m pytest -q || exit_code=$?; echo "PYTEST_EXIT=${exit_code:-0}" >> $GITHUB_ENV; exit ${exit_code:-0}
 
       - name: Run ruff (lint)
         run: python -m ruff check .
 
       - name: Run mypy (type checks, tolerant)
         run: python -m mypy --ignore-missing-imports . || true
+
+      - name: Upload audit log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-log
+          path: logs/audit.log

@@ -107,6 +107,7 @@ from core.orchestrator_components import MessageHandler, HealthMonitor, Backgrou
 from core.admin_handler import AdminHandler
 from core.message_router import MessageRouter
 from core.agent_coordinator import AgentCoordinator
+from core.logging_setup import attach_audit_file_handler
 
 
 # Constants
@@ -208,6 +209,22 @@ class MegaBotOrchestrator:
                    security policies, and system settings.
         """
         self.config = config
+
+        # Optionally attach audit file handler early so structured audit events
+        # emitted by AgentCoordinator and other components are persisted to
+        # disk in deployed runs. This is gated by an opt-in environment
+        # variable to avoid creating files during local tests unless desired.
+        try:
+            if os.environ.get("MEGABOT_ENABLE_AUDIT_LOG", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                audit_path = self.config.paths.get("audit_log", "logs/audit.log")
+                attach_audit_file_handler(audit_path)
+        except Exception:
+            # Don't fail initialization if logging setup cannot be applied
+            pass
 
         # Register core services with DI container
         register_service(Config, config)
