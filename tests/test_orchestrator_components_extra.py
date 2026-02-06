@@ -165,6 +165,15 @@ async def test_start_all_tasks_handles_scheduling_failures(mock_orchestrator):
                             # Should not raise
                             await tasks.start_all_tasks()
 
+                            # Ensure any coroutine objects created for the test
+                            # are explicitly closed to avoid "coroutine was never
+                            # awaited" warnings in some test harnesses.
+                            for _c in (c1, c2, c3, c4):
+                                try:
+                                    _c.close()
+                                except Exception:
+                                    pass
+
     # Ensure start_all_tasks completes without raising when scheduling fails.
     # We avoid making assumptions about the exact coroutine objects closed
     # because test harnesses may wrap coroutines in mocks. The important
