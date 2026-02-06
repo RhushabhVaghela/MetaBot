@@ -85,3 +85,32 @@ class TestDependencyInjection:
             result = injected_func()
             assert result is service
             assert result.value == "func_injected"
+
+    def test_container_has_service(self):
+        container = DependencyContainer()
+        container.register(MockService, MockService())
+        assert container.has_service(MockService) is True
+        assert container.has_service(str) is False
+
+    def test_container_clear(self):
+        container = DependencyContainer()
+        container.register(MockService, MockService())
+        container.clear()
+        assert container.has_service(MockService) is False
+
+    def test_direct_instantiation_fallback(self):
+        container = DependencyContainer()
+        # No registration for MockService
+        resolved = container.resolve(MockService)
+        assert isinstance(resolved, MockService)
+        assert resolved.value == "default"
+
+    def test_resolve_error(self):
+        container = DependencyContainer()
+
+        class Uninstantiable:
+            def __init__(self, arg):  # Requires arg, can't be created directly
+                pass
+
+        with pytest.raises(ValueError, match="No registration found"):
+            container.resolve(Uninstantiable)
