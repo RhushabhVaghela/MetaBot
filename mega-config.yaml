@@ -40,11 +40,15 @@ llm:
   gemini_api_key: null
   github_token: null
   groq_api_key: null
+  llama_cpp_url: null
+  lm_studio_url: null
   mistral_api_key: null
   openai_api_key: null
   openrouter_api_key: null
   perplexity_api_key: null
   sambanova_api_key: null
+  vllm_api_key: null
+  vllm_url: null
   xai_api_key: null
 paths:
   external_repos: /tmp/mock_repos

@@ -1,7 +1,30 @@
 import os
 import yaml
+import importlib.util
 from pydantic import BaseModel, Field  # type: ignore
 from typing import Dict, Any, List, Optional
+
+
+def load_api_credentials():
+    """Load credentials from api-credentials.py if it exists and inject into environment"""
+    cred_path = os.path.join(os.getcwd(), "api-credentials.py")
+    if os.path.exists(cred_path):
+        try:
+            spec = importlib.util.spec_from_file_location("api_credentials", cred_path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                # Inject all uppercase variables into os.environ
+                for key, value in module.__dict__.items():
+                    if key.isupper() and not key.startswith("_"):
+                        # If it's a list (like AUTHORIZED_ADMINS), convert to comma-separated string
+                        if isinstance(value, list):
+                            os.environ[key] = ",".join(map(str, value))
+                        else:
+                            os.environ[key] = str(value)
+                print(f"✅ Loaded API credentials from {cred_path}")
+        except Exception as e:
+            print(f"⚠️ Error loading {cred_path}: {e}")
 
 
 class LLMConfig(BaseModel):
@@ -21,6 +44,10 @@ class LLMConfig(BaseModel):
     mistral_api_key: Optional[str] = Field(default=None, alias="MISTRAL_API_KEY")
     openrouter_api_key: Optional[str] = Field(default=None, alias="OPENROUTER_API_KEY")
     github_token: Optional[str] = Field(default=None, alias="GITHUB_TOKEN")
+    lm_studio_url: Optional[str] = Field(default=None, alias="LM_STUDIO_URL")
+    llama_cpp_url: Optional[str] = Field(default=None, alias="LLAMA_CPP_URL")
+    vllm_url: Optional[str] = Field(default=None, alias="VLLM_URL")
+    vllm_api_key: Optional[str] = Field(default=None, alias="VLLM_API_KEY")
 
 
 class SecurityConfig(BaseModel):
@@ -133,6 +160,9 @@ class Config(BaseModel):
 
 
 def load_config(path: str = "mega-config.yaml") -> Config:
+    # First, load credentials from the python file if it exists
+    load_api_credentials()
+
     # Check if config file exists, create default if not
     if not os.path.exists(path):
         print(f"⚠️  Config file {path} not found, creating default configuration...")
@@ -154,10 +184,18 @@ def load_config(path: str = "mega-config.yaml") -> Config:
     config = Config(**data)
 
     # Auto-inject environment variables into adapter configs if empty
-    if "openclaw" in config.adapters and not config.adapters["openclaw"].auth_token:
-        config.adapters["openclaw"].auth_token = os.environ.get(
-            "OPENCLAW_AUTH_TOKEN", ""
-        )
+    for adapter_name, adapter_config in config.adapters.items():
+        # Check for host/port in environment if empty in config
+        env_host = os.environ.get(f"{adapter_name.upper()}_HOST")
+        env_port = os.environ.get(f"{adapter_name.upper()}_PORT")
+        env_token = os.environ.get(f"{adapter_name.upper()}_AUTH_TOKEN")
+
+        if env_host and not adapter_config.host:
+            adapter_config.host = env_host
+        if env_port and not adapter_config.port:
+            adapter_config.port = int(env_port)
+        if env_token and not adapter_config.auth_token:
+            adapter_config.auth_token = env_token
 
     # Populate LLM and security configs from environment
     _populate_from_environment(config)
@@ -183,14 +221,26 @@ def _populate_from_environment(config: Config) -> None:
         "llm.mistral_api_key": "MISTRAL_API_KEY",
         "llm.openrouter_api_key": "OPENROUTER_API_KEY",
         "llm.github_token": "GITHUB_TOKEN",
+        "llm.lm_studio_url": "LM_STUDIO_URL",
+        "llm.llama_cpp_url": "LLAMA_CPP_URL",
+        "llm.vllm_url": "VLLM_URL",
+        "llm.vllm_api_key": "VLLM_API_KEY",
         "security.megabot_backup_key": "MEGABOT_BACKUP_KEY",
         "security.megabot_encryption_salt": "MEGABOT_ENCRYPTION_SALT",
         "security.megabot_media_path": "MEGABOT_MEDIA_PATH",
+        "system.admin_phone": "ADMIN_PHONE_NUMBER",
+        "system.dnd_start": "DND_START_HOUR",
+        "system.dnd_end": "DND_END_HOUR",
     }
 
     for config_path, env_var in env_mappings.items():
         if os.environ.get(env_var):
             _set_nested_attr(config, config_path, os.environ[env_var])
+
+    # Handle AUTHORIZED_ADMINS (comma-separated string in environment)
+    if os.environ.get("AUTHORIZED_ADMINS"):
+        admins = os.environ["AUTHORIZED_ADMINS"].split(",")
+        config.admins = [a.strip() for a in admins if a.strip()]
 
 
 def _set_nested_attr(obj: Any, path: str, value: Any) -> None:

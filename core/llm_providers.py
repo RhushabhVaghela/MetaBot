@@ -198,6 +198,42 @@ class DeepInfraProvider(OpenAICompatibleProvider):
         )
 
 
+class LMStudioProvider(OpenAICompatibleProvider):
+    def __init__(self, model: str = "local-model", base_url: Optional[str] = None):
+        super().__init__(
+            model=model,
+            api_key="lm-studio",  # LM Studio doesn't require a real key
+            base_url=base_url
+            or os.environ.get(
+                "LM_STUDIO_URL", "http://localhost:1234/v1/chat/completions"
+            ),
+        )
+
+
+class LlamaCppProvider(OpenAICompatibleProvider):
+    def __init__(self, model: str = "local-model", base_url: Optional[str] = None):
+        super().__init__(
+            model=model,
+            api_key="llama-cpp",  # llama.cpp doesn't require a real key
+            base_url=base_url
+            or os.environ.get(
+                "LLAMA_CPP_URL", "http://localhost:8080/v1/chat/completions"
+            ),
+        )
+
+
+class VLLMProvider(OpenAICompatibleProvider):
+    def __init__(
+        self, model: str, api_key: Optional[str] = None, base_url: Optional[str] = None
+    ):
+        super().__init__(
+            model=model,
+            api_key=api_key or os.environ.get("VLLM_API_KEY", "vllm-key"),
+            base_url=base_url
+            or os.environ.get("VLLM_URL", "http://localhost:8000/v1/chat/completions"),
+        )
+
+
 class OllamaProvider(LLMProvider):
     def __init__(self, model: str = "llama3", url: Optional[str] = None):
         self.model = model
@@ -531,5 +567,11 @@ def get_llm_provider(config: Dict[str, Any]) -> LLMProvider:
         return OpenRouterProvider(model=model or "anthropic/claude-3.5-sonnet")
     elif provider_type == "github-copilot":
         return GitHubCopilotProvider(model=model or "gpt-4")
+    elif provider_type == "lmstudio":
+        return LMStudioProvider(model=model or "local-model")
+    elif provider_type == "llamacpp":
+        return LlamaCppProvider(model=model or "local-model")
+    elif provider_type == "vllm":
+        return VLLMProvider(model=model or "local-model")
     else:
         return OllamaProvider(model=model or "llama3")

@@ -87,16 +87,16 @@ MegaBot is fully containerized and optimized for one-command deployment.
    cd MegaBot
    ```
 
-2. **Create environment configuration**
+2. **Configure API Credentials**
    ```bash
-   cp .env.example .env
-   # Edit .env with your settings
-   nano .env
+   cp api-credentials.py.template api-credentials.py
+   # Edit api-credentials.py with your keys and settings
+   nano api-credentials.py
    ```
 
 3. **Start services**
    ```bash
-   docker-compose up -d
+   docker-compose up -d --build
    ```
 
 4. **Pull Ollama model** (first time only)
