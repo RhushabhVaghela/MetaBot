@@ -133,6 +133,27 @@ All integration tests currently pass and verify end-to-end functionality.
   - WebSocket endpoint error handling when orchestrator is None
   - WebSocket endpoint normal operation when orchestrator is initialized
 
+### New security-focused tests
+
+- tests/test_agent_coordinator_toctou.py
+  - Purpose: Covers TOCTOU (time-of-check to time-of-use) edge cases for AgentCoordinator file operations. Tests mock OS-level calls (os.open, os.fstat, os.read, os.replace) and assert that O_NOFOLLOW, fstat validation, and FD-based reads/writes are used to mitigate races.
+
+- tests/test_agent_coordinator_write_edgecases.py
+  - Purpose: Tests write edge-cases including atomic replace, tempfile handling, permission-denied flows, and symlink denial. Uses monkeypatch/patch to simulate failing os.replace and permission errors and verifies audit events are emitted.
+
+Mocking OS operations
+- These tests avoid fragile timing by mocking low-level OS functions (os.open, os.fstat, open, os.replace) and using fixtures to simulate file descriptors and errors. When reproducing or extending these tests locally, follow the fixture patterns used in the new test files.
+
+Linting & static checks (CI)
+- CI runs `ruff` and `mypy` as part of pre-commit/CI checks.
+- Run them locally with:
+
+  # ruff
+  ruff check .
+
+  # mypy
+  mypy .
+
 ### Messaging Server Coverage Enhancement
 - **Before**: 52% coverage (239 statements, 115 missed - requires dedicated conda environment due to cryptography conflicts)
 - **After**: 83% coverage (239 statements, 40 missed - websockets edge cases)
