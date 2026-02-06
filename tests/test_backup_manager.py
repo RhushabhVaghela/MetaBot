@@ -340,3 +340,26 @@ async def test_get_backup_stats_error(backup_manager):
     ):
         stats = await backup_manager.get_backup_stats()
         assert "error" in stats
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_general_exception(backup_manager):
+    """Test restore_backup with general exception (lines 104-106)"""
+    # Mock Fernet constructor to raise exception
+    with patch(
+        "core.memory.backup_manager.Fernet", side_effect=Exception("General Error")
+    ):
+        result = await backup_manager.restore_backup("test.enc", "key")
+        assert "Error: Restore failed: General Error" in result
+
+
+@pytest.mark.asyncio
+async def test_list_backups_dir_not_exists(backup_manager):
+    """Test list_backups when directory does not exist (line 112)"""
+    # Force backup_dir to a non-existent path
+    backup_manager.backup_dir = "/tmp/non-existent-dir-12345"
+    if os.path.exists(backup_manager.backup_dir):
+        os.rmdir(backup_manager.backup_dir)
+
+    result = await backup_manager.list_backups()
+    assert result == []

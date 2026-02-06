@@ -160,8 +160,9 @@ class TestAnthropicProvider:
         assert provider.api_key == "test_key"
 
     @pytest.mark.asyncio
-    async def test_generate_missing_api_key(self):
+    async def test_generate_missing_api_key(self, monkeypatch):
         """Test generate with missing API key"""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         provider = AnthropicProvider("claude-3", None)
         result = await provider.generate(prompt="test")
         assert "API key missing" in result

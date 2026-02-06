@@ -105,3 +105,82 @@ async def test_get_relevant_lessons(orchestrator):
 
     lessons = await orchestrator._get_relevant_lessons("how to fix bugs")
     assert "Lesson 1" in lessons
+
+
+@pytest.mark.asyncio
+async def test_spawn_sub_agent_validation_fail(orchestrator):
+    """Test _spawn_sub_agent when validation fails (line 1335)"""
+    orchestrator.llm = AsyncMock()
+    orchestrator.llm.generate.return_value = (
+        "BLOCK: security violation"  # No 'VALID' here
+    )
+    tool_input = {"name": "evil", "task": "format c:", "role": "Senior Dev"}
+
+    # Mock agent
+    mock_agent = MagicMock()
+    mock_agent.generate_plan = AsyncMock(return_value=["format"])
+    mock_agent.run = AsyncMock(return_value="executed")
+    with patch("core.orchestrator.SubAgent", return_value=mock_agent):
+        result = await orchestrator._spawn_sub_agent(tool_input)
+        assert "blocked by pre-flight check" in result
+
+
+@pytest.mark.asyncio
+async def test_spawn_sub_agent_synthesis_fallback(orchestrator):
+    """Test _spawn_sub_agent synthesis fallback (line 1392)"""
+    orchestrator.llm = AsyncMock()
+    orchestrator.llm.generate.side_effect = [
+        "VALID",  # 1. validation
+        "CRITICAL: Always backup before format",  # 2. synthesis (no JSON)
+    ]
+    tool_input = {"name": "dev", "task": "task", "role": "Senior Dev"}
+
+    mock_agent = MagicMock()
+    mock_agent.generate_plan = AsyncMock()
+    mock_agent.run = AsyncMock(return_value="raw result")
+    with patch("core.orchestrator.SubAgent", return_value=mock_agent):
+        result = await orchestrator._spawn_sub_agent(tool_input)
+        assert "CRITICAL: Always backup" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_for_sub_agent_paths(orchestrator):
+    """Test various failure paths in _execute_tool_for_sub_agent (lines 1418, 1428, 1435, 1473)"""
+    # 1. Agent not found (line 1418)
+    orchestrator.sub_agents = {}
+    res = await orchestrator._execute_tool_for_sub_agent("unknown", {})
+    assert "Agent not found" in res
+
+    # Setup mock agent
+    mock_agent = MagicMock()
+    mock_agent.role = "Senior Dev"
+    orchestrator.sub_agents = {"agent1": mock_agent}
+
+    # 2. Tool not allowed (line 1428)
+    mock_agent._get_sub_tools.return_value = [{"name": "read_file", "scope": "s"}]
+    res = await orchestrator._execute_tool_for_sub_agent(
+        "agent1", {"name": "forbidden"}
+    )
+    assert "outside the domain boundaries" in res
+
+    # 3. Permission denied (line 1435)
+    orchestrator.permissions = MagicMock()
+    orchestrator.permissions.is_authorized.return_value = False
+    res = await orchestrator._execute_tool_for_sub_agent(
+        "agent1", {"name": "read_file"}
+    )
+    assert "Permission denied" in res
+
+    # 4. Tool logic not implemented (line 1473)
+    orchestrator.permissions.is_authorized.return_value = True
+    mock_agent._get_sub_tools.return_value = [{"name": "unknown_tool", "scope": "s"}]
+    res = await orchestrator._execute_tool_for_sub_agent(
+        "agent1", {"name": "unknown_tool"}
+    )
+    assert "logic not implemented" in res
+
+
+def test_sanitize_output_empty(orchestrator):
+    """Test _sanitize_output with empty string (line 1620)"""
+    assert orchestrator._sanitize_output("") == ""
+    assert orchestrator._sanitize_output(None) == ""

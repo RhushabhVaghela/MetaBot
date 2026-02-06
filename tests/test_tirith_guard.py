@@ -135,6 +135,14 @@ class TestTirithGuard:
         result = tg.wrap_output(text)
         assert result == "Colored Bell"
 
+    def test_check_homoglyphs_with_combining_marks(self):
+        """Test homoglyph check with combining marks (line 43 coverage)"""
+        tg = TirithGuard()
+        # Combining acute accent is Mn category
+        text = "e\u0301"
+        # check_homoglyphs should skip the accent and return False because 'e' is < 127
+        assert tg.check_homoglyphs(text) is False
+
 
 class TestTirithGuardSingleton:
     """Test singleton instance"""

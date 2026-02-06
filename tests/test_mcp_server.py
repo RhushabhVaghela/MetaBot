@@ -1,7 +1,7 @@
 import pytest
 import os
 import tempfile
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from core.memory.mcp_server import MemoryServer
 
 
@@ -398,3 +398,18 @@ async def test_handle_tool_call_unknown_tool(memory_server):
     """Test handle_tool_call with unknown tool name."""
     with pytest.raises(ValueError, match="Unknown memory tool: unknown_tool"):
         await memory_server.handle_tool_call("unknown_tool", {})
+
+
+@pytest.mark.asyncio
+async def test_init_legacy_db_exception():
+    """Test _init_legacy_db with exception (lines 45-46)"""
+    with (
+        patch("core.memory.mcp_server.ChatMemoryManager"),
+        patch("core.memory.mcp_server.UserIdentityManager"),
+        patch("core.memory.mcp_server.KnowledgeMemoryManager"),
+        patch("core.memory.mcp_server.MemoryBackupManager"),
+        patch("sqlite3.connect", side_effect=Exception("DB Error")),
+    ):
+        # Should catch the error and log it
+        server = MemoryServer("/tmp/failed_db.db")
+        assert server.db_path == "/tmp/failed_db.db"

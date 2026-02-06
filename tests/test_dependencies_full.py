@@ -114,3 +114,81 @@ class TestDependencyInjection:
 
         with pytest.raises(ValueError, match="No registration found"):
             container.resolve(Uninstantiable)
+
+
+def test_factory_with_singleton_property():
+    """Test factory that returns an object with _singleton=True (line 54)"""
+    from core.dependencies import DependencyContainer
+
+    container = DependencyContainer()
+
+    class SingletonService:
+        def __init__(self):
+            self._singleton = True
+
+    container.register_factory(SingletonService, lambda: SingletonService())
+
+    resolved1 = container.resolve(SingletonService)
+    resolved2 = container.resolve(SingletonService)
+
+    assert resolved1 is resolved2
+
+
+def test_get_container():
+    """Test get_container function (line 85)"""
+    from core.dependencies import get_container, DependencyContainer
+
+    container = get_container()
+    assert isinstance(container, DependencyContainer)
+
+
+def test_inject_optional_dependencies():
+    """Test inject decorator with optional (unresolvable) dependencies (lines 107-108, 122-123)"""
+    from core.dependencies import inject, dependency_scope
+
+    class Unresolvable:
+        def __init__(self, arg):
+            pass  # Cannot be auto-instantiated
+
+    with dependency_scope():
+        # Class injection
+        @inject(Unresolvable)
+        class Client:
+            dep: Unresolvable
+
+            def __init__(self, dep=None):
+                self.dep = dep
+
+        client = Client()
+        assert client.dep is None  # Should have passed on ValueError
+
+        # Function injection
+        @inject(Unresolvable)
+        def func(dep: Unresolvable = None):
+            return dep
+
+        assert func() is None  # Should have passed on ValueError
+
+
+def test_registration_helpers():
+    """Test register_factory and register_singleton helper functions (lines 151, 156)"""
+    from core.dependencies import (
+        register_factory,
+        register_singleton,
+        resolve_service,
+        dependency_scope,
+    )
+
+    class FactoryService:
+        pass
+
+    class SingletonService:
+        pass
+
+    with dependency_scope():
+        register_factory(FactoryService, lambda: FactoryService())
+        assert isinstance(resolve_service(FactoryService), FactoryService)
+
+        s = SingletonService()
+        register_singleton(SingletonService, s)
+        assert resolve_service(SingletonService) is s

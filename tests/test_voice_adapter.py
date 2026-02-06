@@ -156,3 +156,47 @@ class TestVoiceAdapter:
             call = instance.calls.create(to="+123", from_="+456")
             assert hasattr(call, "sid")
             assert call.sid.startswith("CA")
+
+    @pytest.mark.asyncio
+    async def test_make_call_ivr(self, voice_adapter_with_callback):
+        """Test making a call with IVR enabled (lines 95-96)"""
+        mock_call = MagicMock()
+        mock_call.sid = "CA_IVR"
+        voice_adapter_with_callback.client.calls.create.return_value = mock_call
+
+        sid = await voice_adapter_with_callback.make_call(
+            "+1987654321", "Confirm action", ivr=True, action_id="act123"
+        )
+
+        assert sid == "CA_IVR"
+        args = voice_adapter_with_callback.client.calls.create.call_args[1]
+        assert "twiml" in args
+        assert "action_id=act123" in args["twiml"]
+        assert "<Gather" in args["twiml"]
+
+    @pytest.mark.asyncio
+    async def test_make_call_no_client(self, voice_adapter):
+        """Test make_call when client is not initialized (lines 130-131)"""
+        voice_adapter.client = None
+
+        with patch("builtins.print") as mock_print:
+            sid = await voice_adapter.make_call("+123", "Hello")
+            assert sid == "error_no_client"
+            mock_print.assert_called_with(
+                "[Voice] Cannot make call: Twilio client not initialized."
+            )
+
+    def test_twilio_fallback_import_full_coverage(self):
+        """Test the fallback mocks in voice_adapter for full coverage (lines 15-28)"""
+        # Patch twilio.rest to be None to trigger fallback during reload
+        with patch.dict("sys.modules", {"twilio.rest": None}):
+            import importlib
+            import adapters.voice_adapter
+
+            importlib.reload(adapters.voice_adapter)
+
+            # Test fallback Client
+            client = adapters.voice_adapter.Client(None, None)
+            call = client.calls.create(to="+123")
+            assert call.sid.startswith("CA")
+            assert len(call.sid) == 34  # CA + 32 hex

@@ -222,3 +222,19 @@ class TestComputerDriver:
             decoded = base64.b64decode(result)
             screenshot_img = Image.open(io.BytesIO(decoded))
             assert screenshot_img.size == (1024, 768)  # No resize
+
+    def test_mock_pyautogui_methods(self, driver):
+        """Test methods of MockPyAutoGUI (lines 25, 28, 31, 34, 37, 40-41)"""
+        with patch.dict("sys.modules", {"pyautogui": None}):
+            pg = driver._get_pyautogui()
+
+            # These just print, but we want to cover the lines
+            pg.moveTo(100, 100)
+            pg.click()
+            pg.rightClick()
+            pg.write("test")
+            pg.press("enter")
+
+            img = pg.screenshot()
+            assert isinstance(img, Image.Image)
+            assert img.size == (1024, 768)

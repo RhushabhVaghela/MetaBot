@@ -815,7 +815,9 @@ class TestTelegramAdapter:
     async def test_get_updates_with_offset(self, adapter):
         with patch.object(adapter, "_make_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = []
-            await adapter.get_updates(limit=50, timeout=10, offset=100, allowed_updates=["message"])
+            await adapter.get_updates(
+                limit=50, timeout=10, offset=100, allowed_updates=["message"]
+            )
             mock_req.assert_called_once()
             call_args = mock_req.call_args[0][1]  # Second positional arg is data
             assert call_args["offset"] == 100
@@ -833,7 +835,11 @@ class TestTelegramAdapter:
         with patch.object(adapter, "_make_request", new_callable=AsyncMock) as mock_req:
             mock_req.return_value = True
             result = await adapter.answer_callback_query(
-                "cb123", text="Processing...", show_alert=True, url="http://example.com", cache_time=30
+                "cb123",
+                text="Processing...",
+                show_alert=True,
+                url="http://example.com",
+                cache_time=30,
             )
             assert result is True
             call_args = mock_req.call_args[0][1]
@@ -877,6 +883,61 @@ class TestTelegramAdapter:
 
         result = await adapter._make_request("test")
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_handle_webhook_error_handler_exception(self, adapter):
+        """Test handle_webhook with exception in error handler (lines 1234-1235)"""
+        # Register a message handler that fails
+        adapter.register_message_handler(
+            AsyncMock(side_effect=ValueError("Handler failed"))
+        )
+
+        # Register an error handler that also fails
+        def failing_error_handler(exc, message):
+            raise RuntimeError("Error handler failed")
+
+        adapter.register_error_handler(failing_error_handler)
+
+        webhook_data = {
+            "update_id": 100,
+            "message": {
+                "message_id": 55,
+                "chat": {"id": 123, "type": "private"},
+                "from": {"id": 321, "first_name": "Tester"},
+                "text": "test error handler failure",
+            },
+        }
+
+        # Should catch RuntimeError and proceed (line 1235)
+        result = await adapter.handle_webhook(webhook_data)
+        assert result is not None
+
+    def test_generate_secret_token(self, adapter):
+        """Test _generate_secret_token (line 1290)"""
+        token = adapter._generate_secret_token()
+        assert len(token) == 32
+        assert isinstance(token, str)
+
+    @pytest.mark.asyncio
+    async def test_main_execution(self):
+        """Test main function execution (lines 1301-1313)"""
+        with (
+            patch("adapters.telegram_adapter.TelegramAdapter") as mock_adapter_class,
+            patch("builtins.print") as mock_print,
+        ):
+            mock_adapter = AsyncMock()
+            mock_adapter_class.return_value = mock_adapter
+            mock_adapter.initialize.return_value = True
+            mock_adapter.me = {"username": "testbot"}
+
+            from adapters.telegram_adapter import main
+
+            await main()
+
+            mock_adapter_class.assert_called_once()
+            mock_adapter.initialize.assert_called_once()
+            mock_adapter.register_message_handler.assert_called_once()
+            mock_adapter.send_message.assert_called_once()
 
 
 if __name__ == "__main__":

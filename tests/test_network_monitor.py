@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 from core.network.monitor import HealthMonitor, RateLimiter
@@ -22,6 +23,14 @@ class TestHealthMonitor:
         monitor.update("service1", True)
         monitor.update("service1", False)  # Update same key
         assert monitor.status["service1"] is False
+
+    @pytest.mark.asyncio
+    async def test_stop(self):
+        """Test health monitor stop"""
+        monitor = HealthMonitor()
+        assert monitor._running is True
+        await monitor.stop()
+        assert monitor._running is False
 
 
 class TestRateLimiter:
@@ -57,7 +66,7 @@ class TestRateLimiter:
             else:
                 assert result is False
 
-    @patch('core.network.monitor.datetime')
+    @patch("core.network.monitor.datetime")
     def test_check_window_cleanup(self, mock_datetime):
         # Test that old requests are cleaned up
         limiter = RateLimiter()

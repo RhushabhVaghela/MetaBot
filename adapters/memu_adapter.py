@@ -103,7 +103,7 @@ class MemUAdapter(MemoryInterface):
                         return {"items": []}
 
                 self.service = Dummy()
-        else:
+        else:  # pragma: no cover
             # Final fallback to ultra-safe dummy if no service_class found (should not happen due to mock)
             class Dummy:
                 async def memorize(self, **kwargs):

@@ -86,3 +86,71 @@ async def test_mcp_manager_start_all():
     await manager.start_all()
     for s in manager.servers.values():
         assert s.start.called
+
+
+@pytest.mark.asyncio
+async def test_mcp_adapter_fetch_tools_success():
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        mock_process = MagicMock()
+        mock_process.stdin.write = MagicMock()
+        mock_process.stdin.drain = AsyncMock()
+        mock_process.stdout.readline = AsyncMock()
+        mock_exec.return_value = mock_process
+        mock_process.stdout.readline.return_value = (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "result": {"tools": [{"name": "tool1"}, {"name": "tool2"}]},
+                }
+            ).encode()
+            + b"\n"
+        )
+
+        adapter = MCPAdapter({"name": "test", "command": "npx"})
+        await adapter.start()
+        assert len(adapter.tools) == 2
+        assert adapter.tools[0]["name"] == "tool1"
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_find_server_for_tool():
+    manager = MCPManager(
+        [{"name": "s1", "command": "c1"}, {"name": "s2", "command": "c2"}]
+    )
+    manager.servers["s1"].tools = [{"name": "tool1"}]
+    manager.servers["s2"].tools = [{"name": "tool2"}]
+
+    assert manager.find_server_for_tool("tool1") == "s1"
+    assert manager.find_server_for_tool("tool2") == "s2"
+    assert manager.find_server_for_tool("tool3") is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_call_tool_lookup():
+    with patch(
+        "adapters.mcp_adapter.MCPAdapter.execute", new_callable=AsyncMock
+    ) as mock_execute:
+        mock_execute.return_value = {"result": "ok"}
+        manager = MCPManager([{"name": "s1", "command": "c1"}])
+        manager.servers["s1"].tools = [{"name": "tool1"}]
+        manager.servers["s1"].process = MagicMock()
+
+        result = await manager.call_tool(None, "tool1", {})
+        assert result["result"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_call_tool_fallback():
+    # One server fallback
+    manager = MCPManager([{"name": "s1", "command": "c1"}])
+    manager.servers["s1"].execute = AsyncMock(return_value={"result": "fallback_ok"})
+    result = await manager.call_tool(None, "unknown_tool", {})
+    assert result["result"] == "fallback_ok"
+
+    # Multiple servers, no fallback
+    manager = MCPManager(
+        [{"name": "s1", "command": "c1"}, {"name": "s2", "command": "c2"}]
+    )
+    result = await manager.call_tool(None, "unknown_tool", {})
+    assert "error" in result
+    assert "not found on any MCP server" in result["error"]

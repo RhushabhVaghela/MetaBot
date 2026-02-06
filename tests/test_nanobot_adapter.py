@@ -208,3 +208,60 @@ async def test_messenger_methods(capsys):
     await adapter.messenger.send_whatsapp("456", "test whatsapp")
     captured = capsys.readouterr()
     assert "Mock WhatsApp: Sent 'test whatsapp' to 456" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_send_message_telegram(capsys):
+    """Test sending message via Telegram."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    message = Message(
+        content="Hello Telegram",
+        sender="test_user",
+        metadata={"recipient": "123456789", "platform": "telegram"},
+    )
+
+    await adapter.send_message(message)
+
+    captured = capsys.readouterr()
+    assert "Mock Telegram: Sent 'Hello Telegram' to 123456789" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_send_message_telegram_by_recipient_prefix(capsys):
+    """Test sending message via Telegram based on recipient prefix."""
+    adapter = NanobotAdapter("/fake/path", "telegram_token", "whatsapp_token")
+
+    message = Message(
+        content="Hello Telegram",
+        sender="test_user",
+        metadata={"recipient": "@testuser", "platform": "unknown"},
+    )
+
+    await adapter.send_message(message)
+
+    captured = capsys.readouterr()
+    assert "Mock Telegram: Sent 'Hello Telegram' to @testuser" in captured.out
+
+
+@pytest.mark.asyncio
+async def test_nanobot_adapter_path_finding_import_error():
+    """Test path finding when import fails after finding path."""
+    import_attempts = [0]
+
+    def mock_import_side_effect(name, *args, **kwargs):
+        if name == "nanobot.core":
+            # Always fail for nanobot.core
+            raise ImportError("Import failed")
+        return MagicMock()
+
+    with (
+        patch("sys.path") as mock_sys_path,
+        patch("os.path.exists", side_effect=lambda p: p == "/valid/path/src"),
+        patch("builtins.__import__", side_effect=mock_import_side_effect),
+        patch("builtins.print") as mock_print,
+    ):
+        adapter = NanobotAdapter("/valid/path", "t", "w")
+
+        # Should fall back to mock because import failed
+        assert "MockMarketAnalyzer" in str(type(adapter.market_analyzer))

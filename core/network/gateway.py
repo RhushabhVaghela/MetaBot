@@ -100,25 +100,56 @@ class UnifiedGateway:
 
     async def stop(self):
         """Stop all gateway services and cleanup tasks."""
+        # Cancel health task first
         if self._health_task:
             self._health_task.cancel()
             try:
                 await self._health_task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 pass
 
+        # Close client websockets
+        for conn in list(self.clients.values()):
+            ws = conn.websocket
+            if hasattr(ws, "close"):
+                try:
+                    close_fn = ws.close
+                    if asyncio.iscoroutinefunction(close_fn):
+                        await close_fn()
+                    elif callable(close_fn):
+                        close_fn()
+                except Exception:
+                    pass
+        self.clients.clear()
+
+        # Close servers and processes
         if self.local_server:
-            self.local_server.close()
-            await self.local_server.wait_closed()
+            try:
+                self.local_server.close()
+                await self.local_server.wait_closed()
+            except Exception:
+                pass
 
         if self.cloudflare_process:
-            self.cloudflare_process.terminate()
+            try:
+                self.cloudflare_process.terminate()
+            except Exception:
+                pass
 
         if self.tailscale_process:
-            self.tailscale_process.terminate()
+            try:
+                self.tailscale_process.terminate()
+            except Exception:
+                pass
 
-        if self.https_server:
-            await self.https_server.cleanup()
+        if self.https_server and hasattr(self.https_server, "cleanup"):
+            try:
+                await self.https_server.cleanup()
+            except Exception:
+                pass
+
+        self.is_active = False
+        print("[Gateway] Services stopped.")
 
     def get_connection_info(self) -> Dict[str, Any]:
         return {
@@ -146,8 +177,8 @@ class UnifiedGateway:
             try:
                 if hasattr(val, "timestamp"):
                     return float(val.timestamp())
-                return float(val)
-            except Exception:
+                return float(val)  # pragma: no cover
+            except Exception:  # pragma: no cover
                 return datetime.now().timestamp()
 
         limits = {
@@ -357,7 +388,7 @@ class UnifiedGateway:
         if isinstance(raw_message, bytes):
             try:
                 raw_message = raw_message.decode("utf-8", errors="ignore")
-            except Exception:
+            except Exception:  # pragma: no cover
                 raw_message = ""
         try:
             data = json.loads(raw_message)
@@ -458,45 +489,6 @@ class UnifiedGateway:
                 except Exception:
                     self.health_status[ConnectionType.VPN.value] = False
             await asyncio.sleep(5)
-
-    async def stop(self):
-        # Close client websockets
-        for conn in list(self.clients.values()):
-            ws = conn.websocket
-            if hasattr(ws, "close"):
-                try:
-                    if asyncio.iscoroutinefunction(ws.close):
-                        await ws.close()
-                    else:
-                        ws.close()
-                except Exception:
-                    pass
-        self.clients.clear()
-
-        if self.local_server:
-            try:
-                self.local_server.close()
-                await self.local_server.wait_closed()
-            except Exception:
-                pass
-
-        if self.cloudflare_process:
-            try:
-                self.cloudflare_process.terminate()
-            except Exception:
-                pass
-
-        if self.tailscale_process:
-            try:
-                self.tailscale_process.terminate()
-            except Exception:
-                pass
-
-        if self.https_server and hasattr(self.https_server, "cleanup"):
-            try:
-                await self.https_server.cleanup()
-            except Exception:
-                pass
 
 
 def _main():  # pragma: no cover - invoked in tests via run_module

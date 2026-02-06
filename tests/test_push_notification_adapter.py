@@ -1163,3 +1163,75 @@ class TestPushNotificationAdapterBranches:
             import asyncio
 
             assert asyncio.iscoroutinefunction(main)
+
+    @pytest.mark.asyncio
+    async def test_send_broadcast_no_active_tokens(self, adapter):
+        """Test send_broadcast when no active tokens are registered"""
+        adapter._firebase_app = MagicMock()
+        adapter.device_tokens = {}
+        notif = create_notification("T", "B")
+
+        result = await adapter.send_broadcast(notif)
+        assert result.success is False
+        assert result.error == "No active tokens registered"
+
+    @pytest.mark.asyncio
+    async def test_send_webpush_full_coverage(self, adapter):
+        """Test _send_webpush with dry_run and success paths"""
+        adapter._firebase_app = MagicMock()
+        notif = create_notification("T", "B")
+
+        with patch("adapters.push_notification_adapter.messaging.send") as mock_send:
+            mock_send.return_value = "web_msg_id"
+
+            # Test dry_run (line 1029)
+            result = await adapter._send_webpush("t", notif, dry_run=True)
+            assert result.success is True
+            mock_send.assert_not_called()
+
+            # Test success (line 1032)
+            result = await adapter._send_webpush("t", notif, dry_run=False)
+            assert result.success is True
+            assert result.message_id == "web_msg_id"
+            mock_send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_apns_jwt_success(self, adapter):
+        """Test _get_apns_jwt success path (line 1066)"""
+        adapter.apns_key_path = "/tmp/key.p8"
+        adapter.apns_key_id = "keyid"
+        adapter.apns_team_id = "teamid"
+
+        with patch("builtins.open", mock_open(read_data="key_data")):
+            with patch("jwt.encode", return_value="mock_jwt_token"):
+                token = await adapter._get_apns_jwt()
+                assert token == "mock_jwt_token"
+
+    @pytest.mark.asyncio
+    async def test_channel_management_success(self, adapter):
+        """Test channel creation and deletion success (lines 1082, 1100)"""
+        channel = NotificationChannel(id="new_channel", name="New")
+
+        # Success creation
+        assert await adapter.create_notification_channel(channel) is True
+        assert "new_channel" in adapter.notification_channels
+
+        # Success deletion
+        assert await adapter.delete_notification_channel("new_channel") is True
+        assert "new_channel" not in adapter.notification_channels
+
+    @pytest.mark.asyncio
+    async def test_cleanup_inactive_tokens_success(self, adapter):
+        """Test cleanup_inactive_tokens success path (lines 1146-1148)"""
+        old_date = datetime.now() - timedelta(days=40)
+        adapter.device_tokens = {
+            "t1": DeviceToken("t1", Platform.ANDROID, "u1", last_active=old_date)
+        }
+
+        with patch.object(
+            adapter, "unregister_token", new_callable=AsyncMock
+        ) as mock_unreg:
+            mock_unreg.return_value = True
+            removed = await adapter.cleanup_inactive_tokens(max_inactive_days=30)
+            assert removed == 1
+            mock_unreg.assert_called_once_with("t1")

@@ -303,3 +303,78 @@ class TestLokiMode:
             assert mock_execute.call_count == 2
             # Should have called review twice
             assert mock_review.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_activate_with_memory_conflict_evolution(self, loki_mode):
+        """Test activate with memory conflict resolving to evolution (line 74)"""
+        prd_text = "Build app"
+        with (
+            patch.object(
+                loki_mode, "_retrieve_learned_lessons", new_callable=AsyncMock
+            ) as mock_retrieve,
+            patch.object(
+                loki_mode, "_decompose_prd", new_callable=AsyncMock
+            ) as mock_decompose,
+            patch.object(
+                loki_mode, "_execute_parallel_tasks", new_callable=AsyncMock
+            ) as mock_execute,
+            patch.object(
+                loki_mode, "_run_parallel_review", new_callable=AsyncMock
+            ) as mock_review,
+            patch.object(
+                loki_mode, "_debate_memory_conflict", new_callable=AsyncMock
+            ) as mock_debate,
+            patch.object(
+                loki_mode, "_run_security_audit", new_callable=AsyncMock
+            ) as mock_audit,
+            patch.object(
+                loki_mode, "_deploy_product", new_callable=AsyncMock
+            ) as mock_deploy,
+            patch.object(
+                loki_mode, "_save_loki_macro", new_callable=AsyncMock
+            ) as mock_save,
+            patch.object(
+                loki_mode, "_relay_status", new_callable=AsyncMock
+            ) as mock_relay,
+        ):
+            mock_retrieve.return_value = "memory context"
+            mock_decompose.return_value = [
+                {"name": "dev", "role": "Senior Dev", "task_description": "implement"}
+            ]
+            mock_execute.return_value = ["code result"]
+            mock_review.return_value = "MEMORY CONFLICT: some conflict"
+            mock_debate.return_value = True  # Evolution! (line 74)
+            mock_audit.return_value = "audit passed"
+            mock_deploy.return_value = "deployed"
+
+            await loki_mode.activate(prd_text)
+
+            mock_relay.assert_any_call(
+                "✅ Mediation SUCCESS: Accepted as Architectural Evolution."
+            )
+
+    @pytest.mark.asyncio
+    async def test_decompose_prd_json_parse_exception(self, loki_mode):
+        """Test _decompose_prd with JSON parse exception (lines 288-289)"""
+        loki_mode.orchestrator.llm.generate = AsyncMock(return_value="[invalid json]")
+
+        # Patch json.loads to raise an exception
+        with patch("json.loads", side_effect=ValueError("JSON Error")):
+            result = await loki_mode._decompose_prd("test prd")
+            # Should hit except block and return default
+            assert len(result) == 1
+            assert result[0]["name"] == "Developer"
+
+    @pytest.mark.asyncio
+    async def test_run_security_audit_secret_leak(self, loki_mode):
+        """Test _run_security_audit with secret leak warning (line 341)"""
+        results = ["api_key = 'sk-12345'"]
+
+        with patch("adapters.security.tirith_guard.guard.validate", return_value=True):
+            with patch("builtins.print") as mock_print:
+                result = await loki_mode._run_security_audit(results)
+                assert "Passed" in result
+                # Check for warning print
+                mock_print.assert_any_call(
+                    "⚠️ SECURITY WARNING: Potential secret leak detected (pattern: api[_-]?key)"
+                )

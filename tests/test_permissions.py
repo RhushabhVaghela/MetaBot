@@ -57,3 +57,21 @@ class TestPermissionManager:
         assert pm.get_effective_level("ls") == PermissionLevel.AUTO
         assert pm.get_effective_level("rm") == PermissionLevel.NEVER
         assert pm.default_level == PermissionLevel.NEVER
+
+    def test_set_policy_invalid(self):
+        """Test set_policy with invalid level (lines 35-36)"""
+        pm = PermissionManager()
+        pm.set_policy("test", "INVALID")
+        assert "test" not in pm.overrides
+
+    def test_load_from_config_invalid_default(self):
+        """Test load_from_config with invalid default_permission (lines 101-102)"""
+        pm = PermissionManager("AUTO")
+        pm.load_from_config({"default_permission": "INVALID"})
+        # Should remain at AUTO (previous level)
+        assert pm.default_level == PermissionLevel.AUTO
+
+    def test_get_effective_level_default(self):
+        """Test get_effective_level returns default when no match (line 69)"""
+        pm = PermissionManager("NEVER")
+        assert pm.get_effective_level("some.unknown.scope") == PermissionLevel.NEVER

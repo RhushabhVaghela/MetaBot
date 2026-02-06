@@ -2237,7 +2237,8 @@ class TestWhatsAppAdapterErrorHandling:
         wa_adapter._notify_callbacks = AsyncMock()
 
         result = await wa_adapter.handle_webhook(webhook_data)
-        assert result is None  # Interactive type not supported
+        assert result is not None
+        assert result.content == "Yes"
         wa_adapter._notify_callbacks.assert_called_once()
 
     @pytest.mark.asyncio

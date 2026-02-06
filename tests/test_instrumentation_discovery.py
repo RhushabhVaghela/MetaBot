@@ -63,3 +63,44 @@ class TestInstrumentation:
             with pytest.raises(Exception, match="API Error"):
                 await provider.generate("hi")
             assert mock_logger.error.called
+
+    @pytest.mark.asyncio
+    async def test_track_telemetry_extended_token_ids(self):
+        """Test track_telemetry with extended token ID tracking (lines 50, 57, 61)"""
+        from core.instrumentation import track_telemetry
+
+        class MockProvider:
+            model = "test-model"
+
+            @track_telemetry
+            async def generate(self, result_data):
+                return result_data
+
+        provider = MockProvider()
+
+        # Test line 50 (prompt_token_ids)
+        result1 = {"prompt_token_ids": [1, 2, 3], "usage": {}}
+        await provider.generate(result1)
+
+        # Test line 57 (response_token_ids)
+        result2 = {"choices": [{"response_token_ids": [4, 5, 6]}], "usage": {}}
+        await provider.generate(result2)
+
+        # Test line 61 (token_ids)
+        result3 = {"choices": [{"token_ids": [7, 8, 9]}], "usage": {}}
+        await provider.generate(result3)
+
+    @pytest.mark.asyncio
+    async def test_track_telemetry_list_response(self):
+        """Test track_telemetry with list response (lines 63-66)"""
+        from core.instrumentation import track_telemetry
+
+        class MockProvider:
+            model = "test-model"
+
+            @track_telemetry
+            async def generate(self, result_list):
+                return result_list
+
+        provider = MockProvider()
+        await provider.generate([{"type": "text", "text": "hello"}])

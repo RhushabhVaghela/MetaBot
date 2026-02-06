@@ -78,10 +78,6 @@ class SecurityConfig(BaseModel):
             raise ValueError(
                 "MEGABOT_ENCRYPTION_SALT must be at least 16 characters long for security"
             )
-        if len(self.megabot_encryption_salt) < 16:
-            raise ValueError(
-                "MEGABOT_ENCRYPTION_SALT must be at least 16 characters long for security"
-            )
 
 
 class AdapterConfig(BaseModel):
@@ -132,9 +128,8 @@ class Config(BaseModel):
 
         missing = []
         for var, description in required_env_vars.items():
-            if not os.environ.get(var) and not (
-                self.adapters.get("openclaw") and self.adapters["openclaw"].auth_token
-            ):
+            # If the variable is missing from environment
+            if not os.environ.get(var):
                 # Specific check for openclaw auth_token in config vs env
                 if (
                     var == "OPENCLAW_AUTH_TOKEN"

@@ -1,13 +1,15 @@
-import pytest
-import yaml
-import sys
 import os
-from unittest.mock import MagicMock
-from core.config import Config, SystemConfig, AdapterConfig, SecurityConfig
+import sys
 
 # Set test environment variables before any imports
+os.environ["PYTEST_CURRENT_TEST"] = "true"
 os.environ["MEGABOT_ENCRYPTION_SALT"] = "test-salt-minimum-16-chars"
 os.environ["MEGABOT_BACKUP_KEY"] = "test-backup-key-32-chars-long-string"
+
+import pytest
+import yaml
+from unittest.mock import MagicMock
+from core.config import Config, SystemConfig, AdapterConfig, SecurityConfig
 
 # Global mocking for firebase_admin to prevent import errors in tests
 sys.modules["firebase_admin"] = MagicMock()

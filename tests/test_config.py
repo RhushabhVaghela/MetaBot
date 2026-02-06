@@ -110,3 +110,119 @@ def test_load_api_credentials(tmp_path, monkeypatch):
 
     assert os.environ.get("TEST_KEY") == "test-value"
     assert os.environ.get("AUTHORIZED_ADMINS") == "user1,user2"
+
+
+def test_load_api_credentials_exception(tmp_path, monkeypatch):
+    """Test exception handling in load_api_credentials (lines 26-27)"""
+    monkeypatch.chdir(tmp_path)
+    # Create invalid python file
+    cred_file = tmp_path / "api-credentials.py"
+    cred_file.write_text("INVALID PYTHON")
+
+    import io
+    from contextlib import redirect_stdout
+    from core.config import load_api_credentials
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        load_api_credentials()
+
+    assert "⚠️ Error loading" in output.getvalue()
+
+
+def test_security_config_validation(monkeypatch):
+    """Test SecurityConfig validation when not in test mode (lines 71-82)"""
+    from core.config import SecurityConfig
+    import pytest
+    from pydantic import ValidationError
+
+    # Remove PYTEST_CURRENT_TEST to trigger production validation
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    # Test missing salt
+    with pytest.raises(ValidationError) as excinfo:
+        SecurityConfig(MEGABOT_ENCRYPTION_SALT="")
+    assert "MEGABOT_ENCRYPTION_SALT is required" in str(excinfo.value)
+
+    # Test short salt
+    with pytest.raises(ValidationError) as excinfo:
+        SecurityConfig(MEGABOT_ENCRYPTION_SALT="too-short")
+    assert "must be at least 16 characters" in str(excinfo.value)
+
+
+def test_validate_environment_full(monkeypatch):
+    """Test Config.validate_environment with various scenarios (lines 127, 129, 144, 154)"""
+    from core.config import Config, SystemConfig, AdapterConfig
+
+    monkeypatch.delenv("OPENCLAW_AUTH_TOKEN", raising=False)
+
+    config = Config(
+        system=SystemConfig(),
+        adapters={
+            "openai": AdapterConfig(),
+            "anthropic": AdapterConfig(),
+            "openclaw": AdapterConfig(auth_token="config-token"),
+        },
+        paths={},
+    )
+
+    # Missing LLM keys but openclaw token is in config (line 144)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert config.validate_environment() is False
+
+    # All present
+    monkeypatch.setenv("OPENAI_API_KEY", "o")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    assert config.validate_environment() is True
+
+
+def test_load_config_default_creation(tmp_path):
+    """Test load_config when file doesn't exist (lines 168-179)"""
+    config_file = tmp_path / "nonexistent.yaml"
+    from core.config import load_config
+
+    # This should create the file and return a default config
+    config = load_config(str(config_file))
+
+    assert config_file.exists()
+    assert config.system.name == "MegaBot"
+
+
+def test_load_config_adapter_env_injection(tmp_path, monkeypatch):
+    """Test injection of environment variables into adapter config (lines 194, 196, 198)"""
+    config_data = {
+        "system": {"name": "Test"},
+        "adapters": {"custom": {"host": "", "port": 0, "auth_token": ""}},
+        "paths": {"workspaces": "/tmp", "external_repos": "/tmp"},
+    }
+    config_file = tmp_path / "inject.yaml"
+    import yaml
+
+    with open(config_file, "w") as f:
+        yaml.dump(config_data, f)
+
+    monkeypatch.setenv("CUSTOM_HOST", "1.2.3.4")
+    monkeypatch.setenv("CUSTOM_PORT", "9999")
+    monkeypatch.setenv("CUSTOM_AUTH_TOKEN", "secret-token")
+
+    from core.config import load_config
+
+    config = load_config(str(config_file))
+
+    assert config.adapters["custom"].host == "1.2.3.4"
+    assert config.adapters["custom"].port == 9999
+    assert config.adapters["custom"].auth_token == "secret-token"
+
+
+def test_set_nested_attr_no_attr():
+    """Test _set_nested_attr with missing attribute (line 252)"""
+    from core.config import _set_nested_attr
+
+    class MockObj:
+        pass
+
+    obj = MockObj()
+    # Should return early without raising
+    _set_nested_attr(obj, "nonexistent.attr", "val")
+    assert not hasattr(obj, "nonexistent")

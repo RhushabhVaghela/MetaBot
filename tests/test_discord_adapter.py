@@ -9,21 +9,34 @@ import adapters.discord_adapter
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from adapters.messaging import MessageType
 
+
 # Mock discord module
 class MockNotFound(Exception):
     pass
+
 
 discord_mock = MagicMock()
 discord_mock.Intents = MagicMock()
 discord_mock.Intents.default = MagicMock(return_value=Mock())
 discord_mock.Client = MagicMock()
+
+
+# Mock app_commands.command decorator to return the original function
+def mock_command_decorator(*args, **kwargs):
+    def decorator(func):
+        return func
+
+    return decorator
+
+
 discord_mock.app_commands = MagicMock()
+discord_mock.app_commands.command = mock_command_decorator
 discord_mock.app_commands.CommandTree = MagicMock()
 discord_mock.Embed = MagicMock()
 discord_mock.File = MagicMock()
 discord_mock.DMChannel = MagicMock()
 # Make CategoryChannel a proper type for isinstance checks
-discord_mock.CategoryChannel = type('CategoryChannel', (), {})
+discord_mock.CategoryChannel = type("CategoryChannel", (), {})
 discord_mock.TextChannel = MagicMock()
 discord_mock.VoiceChannel = MagicMock()
 discord_mock.NotFound = MockNotFound
@@ -103,7 +116,7 @@ class TestDiscordAdapter:
 
         fields = [
             {"name": "Field1", "value": "Value1", "inline": True},
-            {"name": "Field2", "value": "Value2"}
+            {"name": "Field2", "value": "Value2"},
         ]
 
         # Mock the Embed constructor to return a mock with title attribute
@@ -116,7 +129,7 @@ class TestDiscordAdapter:
             channel_id="123456",
             title="Test Title",
             description="Test Description",
-            fields=fields
+            fields=fields,
         )
 
         # Verify embed was created with fields
@@ -140,11 +153,13 @@ class TestDiscordAdapter:
         result = await adapter.send_embed(
             channel_id="123456",
             title="Test Title",
-            thumbnail_url="https://example.com/thumb.png"
+            thumbnail_url="https://example.com/thumb.png",
         )
 
         # Verify embed methods were called
-        mock_embed.set_thumbnail.assert_called_once_with(url="https://example.com/thumb.png")
+        mock_embed.set_thumbnail.assert_called_once_with(
+            url="https://example.com/thumb.png"
+        )
 
     @pytest.mark.asyncio
     async def test_send_embed_with_image(self, adapter, mock_bot):
@@ -161,11 +176,13 @@ class TestDiscordAdapter:
         result = await adapter.send_embed(
             channel_id="123456",
             title="Test Title",
-            image_url="https://example.com/image.png"
+            image_url="https://example.com/image.png",
         )
 
         # Verify embed methods were called
-        mock_embed.set_image.assert_called_once_with(url="https://example.com/image.png")
+        mock_embed.set_image.assert_called_once_with(
+            url="https://example.com/image.png"
+        )
 
     @pytest.mark.asyncio
     async def test_send_embed_with_footer(self, adapter, mock_bot):
@@ -180,9 +197,7 @@ class TestDiscordAdapter:
         discord_mock.Embed.return_value = mock_embed
 
         result = await adapter.send_embed(
-            channel_id="123456",
-            title="Test Title",
-            footer_text="Test Footer"
+            channel_id="123456", title="Test Title", footer_text="Test Footer"
         )
 
         # Verify embed methods were called
@@ -204,11 +219,13 @@ class TestDiscordAdapter:
             channel_id="123456",
             title="Test Title",
             author_name="Test Author",
-            author_icon_url="https://example.com/icon.png"
+            author_icon_url="https://example.com/icon.png",
         )
 
         # Verify embed methods were called
-        mock_embed.set_author.assert_called_once_with(name="Test Author", icon_url="https://example.com/icon.png")
+        mock_embed.set_author.assert_called_once_with(
+            name="Test Author", icon_url="https://example.com/icon.png"
+        )
 
     def test_register_handlers(self, adapter):
         """Test handler registration"""
@@ -688,7 +705,9 @@ class TestDiscordAdapter:
 
         # Mock _to_platform_message
         mock_platform_msg = Mock()
-        with patch.object(adapter, '_to_platform_message', new_callable=AsyncMock) as mock_to_platform:
+        with patch.object(
+            adapter, "_to_platform_message", new_callable=AsyncMock
+        ) as mock_to_platform:
             mock_to_platform.return_value = mock_platform_msg
 
             result = await adapter.send_text("123456", "Test text")
@@ -706,14 +725,14 @@ class TestDiscordAdapter:
 
         # Mock _to_platform_message
         mock_platform_msg = Mock()
-        with patch.object(adapter, '_to_platform_message', new_callable=AsyncMock) as mock_to_platform:
+        with patch.object(
+            adapter, "_to_platform_message", new_callable=AsyncMock
+        ) as mock_to_platform:
             mock_to_platform.return_value = mock_platform_msg
 
             result = await adapter.send_media("123456", "/path/to/media.png")
 
             assert result == mock_platform_msg
-
-
 
     @pytest.mark.asyncio
     async def test_make_call_not_supported(self, adapter):
@@ -721,7 +740,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.make_call("123456")
 
-        mock_print.assert_called_once_with("[Discord] Call initiation not supported for 123456")
+        mock_print.assert_called_once_with(
+            "[Discord] Call initiation not supported for 123456"
+        )
         assert result is False
 
     @pytest.mark.asyncio
@@ -735,7 +756,9 @@ class TestDiscordAdapter:
 
         # Mock _to_platform_message
         mock_platform_msg = Mock()
-        with patch.object(adapter, '_to_platform_message', new_callable=AsyncMock) as mock_to_platform:
+        with patch.object(
+            adapter, "_to_platform_message", new_callable=AsyncMock
+        ) as mock_to_platform:
             mock_to_platform.return_value = mock_platform_msg
 
             result = await adapter.send_document("123456", "/path/to/doc.pdf")
@@ -800,6 +823,13 @@ class TestDiscordAdapter:
             # In the fallback case, it should be a MagicMock from the except block
             assert isinstance(adapters.discord_adapter.discord, MagicMock)
 
+            # Test fallback classes
+            embed = adapters.discord_adapter.Embed()
+            assert embed.to_dict() == {}
+
+            file = adapters.discord_adapter.File()
+            assert file is not None
+
         # Restore the proper mock for other tests
         with patch.dict("sys.modules", {"discord": discord_mock}):
             importlib.reload(adapters.discord_adapter)
@@ -846,7 +876,9 @@ class TestDiscordAdapter:
         mock_text_channel = Mock()
 
         # Set up the category to be an instance of CategoryChannel
-        mock_category.__class__ = discord_mock.CategoryChannel  # Make it an instance of CategoryChannel
+        mock_category.__class__ = (
+            discord_mock.CategoryChannel
+        )  # Make it an instance of CategoryChannel
 
         mock_guild.get_channel.return_value = mock_category
         mock_guild.create_text_channel = AsyncMock(return_value=mock_text_channel)
@@ -856,7 +888,7 @@ class TestDiscordAdapter:
             guild_id="123456",
             name="test-channel",
             channel_type="text",
-            category_id="789012"
+            category_id="789012",
         )
 
         assert result == mock_text_channel
@@ -871,13 +903,17 @@ class TestDiscordAdapter:
         """Test create_channel exception handling"""
         adapter.bot = mock_bot
         mock_guild = Mock()
-        mock_guild.create_text_channel = AsyncMock(side_effect=Exception("Create failed"))
+        mock_guild.create_text_channel = AsyncMock(
+            side_effect=Exception("Create failed")
+        )
         mock_bot.get_guild.return_value = mock_guild
 
         with patch("builtins.print") as mock_print:
             result = await adapter.create_channel("123456", "test-channel", "text")
 
-        mock_print.assert_called_once_with("[Discord] Create channel error: Create failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Create channel error: Create failed"
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -902,6 +938,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers = {}
+
         def mock_event(coro):
             captured_handlers[coro.__name__] = coro
             return coro
@@ -912,7 +949,7 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_ready handler
-        on_ready_handler = captured_handlers.get('on_ready')
+        on_ready_handler = captured_handlers.get("on_ready")
         assert on_ready_handler is not None, "on_ready handler not captured"
 
         # Call the handler
@@ -933,6 +970,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers = {}
+
         def mock_event(coro):
             captured_handlers[coro.__name__] = coro
             return coro
@@ -943,12 +981,14 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_message handler
-        on_message_handler = captured_handlers.get('on_message')
+        on_message_handler = captured_handlers.get("on_message")
         assert on_message_handler is not None, "on_message handler not captured"
 
         # Call the handler - it should return early due to self-ignore
-        with patch.object(adapter, "_handle_command") as mock_handle_command, \
-             patch.object(adapter, "_handle_message") as mock_handle_message:
+        with (
+            patch.object(adapter, "_handle_command") as mock_handle_command,
+            patch.object(adapter, "_handle_message") as mock_handle_message,
+        ):
             await on_message_handler(mock_message)
 
         # Should not have called either handler
@@ -968,6 +1008,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers = {}
+
         def mock_event(coro):
             captured_handlers[coro.__name__] = coro
             return coro
@@ -978,12 +1019,14 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_message handler
-        on_message_handler = captured_handlers.get('on_message')
+        on_message_handler = captured_handlers.get("on_message")
         assert on_message_handler is not None, "on_message handler not captured"
 
         # Call the handler
-        with patch.object(adapter, "_handle_command") as mock_handle_command, \
-             patch.object(adapter, "_handle_message") as mock_handle_message:
+        with (
+            patch.object(adapter, "_handle_command") as mock_handle_command,
+            patch.object(adapter, "_handle_message") as mock_handle_message,
+        ):
             await on_message_handler(mock_message)
 
         # Should call command handler, not message handler
@@ -1003,6 +1046,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers = {}
+
         def mock_event(coro):
             captured_handlers[coro.__name__] = coro
             return coro
@@ -1013,12 +1057,14 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_message handler
-        on_message_handler = captured_handlers.get('on_message')
+        on_message_handler = captured_handlers.get("on_message")
         assert on_message_handler is not None, "on_message handler not captured"
 
         # Call the handler
-        with patch.object(adapter, "_handle_command") as mock_handle_command, \
-             patch.object(adapter, "_handle_message") as mock_handle_message:
+        with (
+            patch.object(adapter, "_handle_command") as mock_handle_command,
+            patch.object(adapter, "_handle_message") as mock_handle_message,
+        ):
             await on_message_handler(mock_message)
 
         # Should call message handler, not command handler
@@ -1037,6 +1083,7 @@ class TestDiscordAdapter:
         mock_user.id = 123456789
 
         handler_called = False
+
         def test_handler(reaction, user, action):
             nonlocal handler_called
             handler_called = True
@@ -1046,6 +1093,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers = {}
+
         def mock_event(coro):
             captured_handlers[coro.__name__] = coro
             return coro
@@ -1056,8 +1104,10 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_add handler
-        on_reaction_add_handler = captured_handlers.get('on_reaction_add')
-        assert on_reaction_add_handler is not None, "on_reaction_add handler not captured"
+        on_reaction_add_handler = captured_handlers.get("on_reaction_add")
+        assert on_reaction_add_handler is not None, (
+            "on_reaction_add handler not captured"
+        )
 
         # Call the handler
         await on_reaction_add_handler(mock_reaction, mock_user)
@@ -1074,6 +1124,7 @@ class TestDiscordAdapter:
         mock_user = adapter.bot.user  # Same object for self-ignore
 
         handler_called = False
+
         def test_handler_self(reaction, user, action):
             nonlocal handler_called
             handler_called = True
@@ -1082,6 +1133,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers_self = {}
+
         def mock_event_self(coro):
             captured_handlers_self[coro.__name__] = coro
             return coro
@@ -1092,8 +1144,10 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_add handler
-        on_reaction_add_handler = captured_handlers_self.get('on_reaction_add')
-        assert on_reaction_add_handler is not None, "on_reaction_add handler not captured"
+        on_reaction_add_handler = captured_handlers_self.get("on_reaction_add")
+        assert on_reaction_add_handler is not None, (
+            "on_reaction_add handler not captured"
+        )
 
         # Call the handler - should ignore self
         await on_reaction_add_handler(mock_reaction, mock_user)
@@ -1119,6 +1173,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers_exc = {}
+
         def mock_event_exc(coro):
             captured_handlers_exc[coro.__name__] = coro
             return coro
@@ -1129,8 +1184,10 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_add handler
-        on_reaction_add_handler = captured_handlers_exc.get('on_reaction_add')
-        assert on_reaction_add_handler is not None, "on_reaction_add handler not captured"
+        on_reaction_add_handler = captured_handlers_exc.get("on_reaction_add")
+        assert on_reaction_add_handler is not None, (
+            "on_reaction_add handler not captured"
+        )
 
         # Call the handler - should catch exception and print
         with patch("builtins.print") as mock_print:
@@ -1153,6 +1210,7 @@ class TestDiscordAdapter:
         mock_user.id = 123456789
 
         handler_called = False
+
         def test_handler(reaction, user, action):
             nonlocal handler_called
             handler_called = True
@@ -1162,6 +1220,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers = {}
+
         def mock_event(coro):
             captured_handlers[coro.__name__] = coro
             return coro
@@ -1172,8 +1231,10 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_remove handler
-        on_reaction_remove_handler = captured_handlers.get('on_reaction_remove')
-        assert on_reaction_remove_handler is not None, "on_reaction_remove handler not captured"
+        on_reaction_remove_handler = captured_handlers.get("on_reaction_remove")
+        assert on_reaction_remove_handler is not None, (
+            "on_reaction_remove handler not captured"
+        )
 
         # Call the handler
         await on_reaction_remove_handler(mock_reaction, mock_user)
@@ -1192,6 +1253,7 @@ class TestDiscordAdapter:
         mock_user.id = 123456789
 
         handler_called = False
+
         async def async_handler(reaction, user, action):
             nonlocal handler_called
             handler_called = True
@@ -1201,6 +1263,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers_async = {}
+
         def mock_event_async(coro):
             captured_handlers_async[coro.__name__] = coro
             return coro
@@ -1211,8 +1274,10 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_add handler
-        on_reaction_add_handler = captured_handlers_async.get('on_reaction_add')
-        assert on_reaction_add_handler is not None, "on_reaction_add handler not captured"
+        on_reaction_add_handler = captured_handlers_async.get("on_reaction_add")
+        assert on_reaction_add_handler is not None, (
+            "on_reaction_add handler not captured"
+        )
 
         # Call the handler
         await on_reaction_add_handler(mock_reaction, mock_user)
@@ -1231,6 +1296,7 @@ class TestDiscordAdapter:
         mock_user.id = 123456789
 
         handler_called = False
+
         async def async_handler_remove(reaction, user, action):
             nonlocal handler_called
             handler_called = True
@@ -1240,6 +1306,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers_async_rm = {}
+
         def mock_event_async_rm(coro):
             captured_handlers_async_rm[coro.__name__] = coro
             return coro
@@ -1250,8 +1317,12 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_remove handler
-        on_reaction_remove_handler = captured_handlers_async_rm.get('on_reaction_remove')
-        assert on_reaction_remove_handler is not None, "on_reaction_remove handler not captured"
+        on_reaction_remove_handler = captured_handlers_async_rm.get(
+            "on_reaction_remove"
+        )
+        assert on_reaction_remove_handler is not None, (
+            "on_reaction_remove handler not captured"
+        )
 
         # Call the handler
         await on_reaction_remove_handler(mock_reaction, mock_user)
@@ -1276,6 +1347,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers_exc = {}
+
         def mock_event_exc(coro):
             captured_handlers_exc[coro.__name__] = coro
             return coro
@@ -1286,8 +1358,10 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_remove handler
-        on_reaction_remove_handler = captured_handlers_exc.get('on_reaction_remove')
-        assert on_reaction_remove_handler is not None, "on_reaction_remove handler not captured"
+        on_reaction_remove_handler = captured_handlers_exc.get("on_reaction_remove")
+        assert on_reaction_remove_handler is not None, (
+            "on_reaction_remove handler not captured"
+        )
 
         # Call the handler - should catch exception and print
         with patch("builtins.print") as mock_print:
@@ -1312,6 +1386,7 @@ class TestDiscordAdapter:
 
         # Mock the event decorator to capture the handler
         captured_handlers_self = {}
+
         def mock_event_self(coro):
             captured_handlers_self[coro.__name__] = coro
             return coro
@@ -1322,8 +1397,10 @@ class TestDiscordAdapter:
         adapter._setup_event_handlers()
 
         # Call the captured on_reaction_remove handler
-        on_reaction_remove_handler = captured_handlers_self.get('on_reaction_remove')
-        assert on_reaction_remove_handler is not None, "on_reaction_remove handler not captured"
+        on_reaction_remove_handler = captured_handlers_self.get("on_reaction_remove")
+        assert on_reaction_remove_handler is not None, (
+            "on_reaction_remove handler not captured"
+        )
 
         # Call the handler - should return early without calling handlers
         await on_reaction_remove_handler(mock_reaction, mock_user)
@@ -1420,7 +1497,9 @@ class TestDiscordAdapter:
         assert call_kwargs["reference"] == mock_reply_msg
 
     @pytest.mark.asyncio
-    async def test_to_platform_message_with_audio_attachment(self, adapter, mock_message):
+    async def test_to_platform_message_with_audio_attachment(
+        self, adapter, mock_message
+    ):
         """Test _to_platform_message with audio attachment"""
         # Mock audio attachment
         mock_attachment = Mock()
@@ -1441,7 +1520,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.send_message("999999999999999999", "Test message")
 
-        mock_print.assert_called_once_with("[Discord] Channel 999999999999999999 not found")
+        mock_print.assert_called_once_with(
+            "[Discord] Channel 999999999999999999 not found"
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -1454,7 +1535,9 @@ class TestDiscordAdapter:
         mock_guild.create_voice_channel = AsyncMock(return_value=mock_voice_channel)
         mock_bot.get_guild.return_value = mock_guild
 
-        result = await adapter.create_channel("123456", "test-voice", channel_type="voice")
+        result = await adapter.create_channel(
+            "123456", "test-voice", channel_type="voice"
+        )
 
         assert result == mock_voice_channel
         mock_guild.create_voice_channel.assert_called_once()
@@ -1492,14 +1575,16 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.get_channel_info("123456")
 
-        mock_print.assert_called_once_with("[Discord] Get channel info error: Channel fetch failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Get channel info error: Channel fetch failed"
+        )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_get_guild_info_success_return(self, adapter, mock_bot):
         """Test get_guild_info returns guild information on success"""
         adapter.bot = mock_bot
-        
+
         # Mock guild
         mock_guild = Mock()
         mock_guild.id = 123456789
@@ -1511,7 +1596,7 @@ class TestDiscordAdapter:
         mock_guild.description = "A test guild"
         mock_guild.icon = Mock()
         mock_guild.icon.url = "https://example.com/icon.png"
-        
+
         mock_bot.get_guild.return_value = mock_guild
 
         result = await adapter.get_guild_info("123456789")
@@ -1533,7 +1618,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.get_guild_info("123456")
 
-        mock_print.assert_called_once_with("[Discord] Get guild info error: Guild fetch failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Get guild info error: Guild fetch failed"
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -1553,17 +1640,23 @@ class TestDiscordAdapter:
         mock_channel = Mock()
         mock_message = Mock()
         mock_channel.fetch_message = AsyncMock(return_value=mock_message)
-        mock_message.add_reaction = AsyncMock(side_effect=Exception("Add reaction failed"))
+        mock_message.add_reaction = AsyncMock(
+            side_effect=Exception("Add reaction failed")
+        )
         mock_bot.get_channel.return_value = mock_channel
 
         with patch("builtins.print") as mock_print:
             result = await adapter.add_reaction("123456", 789012, "👍")
 
-        mock_print.assert_called_once_with("[Discord] Add reaction error: Add reaction failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Add reaction error: Add reaction failed"
+        )
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_remove_reaction_channel_not_found_return_false(self, adapter, mock_bot):
+    async def test_remove_reaction_channel_not_found_return_false(
+        self, adapter, mock_bot
+    ):
         """Test remove_reaction returns False when channel not found"""
         adapter.bot = mock_bot
         mock_bot.get_channel.return_value = None
@@ -1579,18 +1672,24 @@ class TestDiscordAdapter:
         mock_channel = Mock()
         mock_message = Mock()
         mock_channel.fetch_message = AsyncMock(return_value=mock_message)
-        mock_message.remove_reaction = AsyncMock(side_effect=Exception("Remove reaction failed"))
+        mock_message.remove_reaction = AsyncMock(
+            side_effect=Exception("Remove reaction failed")
+        )
         mock_bot.get_channel.return_value = mock_channel
         adapter.bot.user = Mock()
 
         with patch("builtins.print") as mock_print:
             result = await adapter.remove_reaction("123456", 789012, "👍")
 
-        mock_print.assert_called_once_with("[Discord] Remove reaction error: Remove reaction failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Remove reaction error: Remove reaction failed"
+        )
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_delete_message_channel_not_found_return_false(self, adapter, mock_bot):
+    async def test_delete_message_channel_not_found_return_false(
+        self, adapter, mock_bot
+    ):
         """Test delete_message returns False when channel not found"""
         adapter.bot = mock_bot
         mock_bot.get_channel.return_value = None
@@ -1612,7 +1711,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.delete_message("123456", 789012)
 
-        mock_print.assert_called_once_with("[Discord] Delete message error: Delete message failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Delete message error: Delete message failed"
+        )
         assert result is False
 
     @pytest.mark.asyncio
@@ -1652,7 +1753,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.edit_message("123456", 789012, "New content")
 
-        mock_print.assert_called_once_with("[Discord] Edit message error: Edit message failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Edit message error: Edit message failed"
+        )
         assert result is False
 
     @pytest.mark.asyncio
@@ -1664,7 +1767,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.get_user_info("123456")
 
-        mock_print.assert_called_once_with("[Discord] Get user info error: User fetch failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Get user info error: User fetch failed"
+        )
         assert result is None
 
     def test_register_error_handler(self, adapter):
@@ -1677,16 +1782,20 @@ class TestDiscordAdapter:
     async def test_send_text_exception_handling(self, adapter, mock_bot):
         """Test send_text exception handling"""
         adapter.bot = mock_bot
-        
+
         # Mock channel and make send() raise an exception
         mock_channel = AsyncMock()
-        mock_channel.send.side_effect = Exception("'NoneType' object has no attribute 'send'")
+        mock_channel.send.side_effect = Exception(
+            "'NoneType' object has no attribute 'send'"
+        )
         mock_bot.get_channel.return_value = mock_channel
 
         with patch("builtins.print") as mock_print:
             result = await adapter.send_text("123456", "Hello World")
 
-        mock_print.assert_called_once_with("[Discord] Send message error: 'NoneType' object has no attribute 'send'")
+        mock_print.assert_called_once_with(
+            "[Discord] Send message error: 'NoneType' object has no attribute 'send'"
+        )
         assert result is None
         assert result is None
 
@@ -1694,16 +1803,20 @@ class TestDiscordAdapter:
     async def test_send_media_exception_handling(self, adapter, mock_bot):
         """Test send_media exception handling"""
         adapter.bot = mock_bot
-        
+
         # Mock channel and make send() raise an exception
         mock_channel = AsyncMock()
-        mock_channel.send.side_effect = Exception("'NoneType' object has no attribute 'send'")
+        mock_channel.send.side_effect = Exception(
+            "'NoneType' object has no attribute 'send'"
+        )
         mock_bot.get_channel.return_value = mock_channel
 
         with patch("builtins.print") as mock_print:
             result = await adapter.send_media("123456", "/path/to/image.png")
 
-        mock_print.assert_called_once_with("[Discord] Send message error: 'NoneType' object has no attribute 'send'")
+        mock_print.assert_called_once_with(
+            "[Discord] Send message error: 'NoneType' object has no attribute 'send'"
+        )
         assert result is None
         assert result is None
 
@@ -1774,11 +1887,15 @@ class TestDiscordAdapter:
         mock_channel = Mock()
         mock_channel.send = AsyncMock()
         # Make fetch_message raise NotFound exception
-        mock_channel.fetch_message = AsyncMock(side_effect=discord_mock.NotFound(Mock(), Mock()))
+        mock_channel.fetch_message = AsyncMock(
+            side_effect=discord_mock.NotFound(Mock(), Mock())
+        )
         mock_bot.get_channel.return_value = mock_channel
 
         with patch("builtins.print") as mock_print:
-            result = await adapter.send_message("123456", "Test message", reply_to=789012)
+            result = await adapter.send_message(
+                "123456", "Test message", reply_to=789012
+            )
 
         mock_print.assert_called_once_with("[Discord] Reply message 789012 not found")
         # Should continue and send the message despite reply not found
@@ -1833,7 +1950,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.send_text("123456", "Hello World")
 
-        mock_print.assert_called_once_with("[Discord] Send message error: Send text failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Send message error: Send text failed"
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -1847,7 +1966,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.send_media("123456", "/path/to/media.png")
 
-        mock_print.assert_called_once_with("[Discord] Send message error: Send media failed")
+        mock_print.assert_called_once_with(
+            "[Discord] Send message error: Send media failed"
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -1856,7 +1977,9 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.download_media("msg123", "/tmp/save.mp3")
 
-        mock_print.assert_called_once_with("[Discord] Download media not implemented for message msg123")
+        mock_print.assert_called_once_with(
+            "[Discord] Download media not implemented for message msg123"
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -1865,26 +1988,30 @@ class TestDiscordAdapter:
         with patch("builtins.print") as mock_print:
             result = await adapter.make_call("123456", is_video=True)
 
-        mock_print.assert_called_once_with("[Discord] Call initiation not supported for 123456")
+        mock_print.assert_called_once_with(
+            "[Discord] Call initiation not supported for 123456"
+        )
         assert result is False
 
     def test_ping_slash_command_definition(self):
         """Test that ping slash command is defined (covers line 764)"""
         # Import the ping command to ensure it's defined
         from adapters.discord_adapter import ping
+
         assert ping is not None
         # Discord.py decorators add attributes to functions
-        assert hasattr(ping, 'name') or True  # Allow for decorator attributes
-        assert hasattr(ping, 'description') or True
+        assert hasattr(ping, "name") or True  # Allow for decorator attributes
+        assert hasattr(ping, "description") or True
 
     @pytest.mark.asyncio
     async def test_main_function_execution(self, adapter):
         """Test main function initialization and basic execution"""
         # Mock all the components that main() uses
-        with patch('adapters.discord_adapter.DiscordAdapter') as mock_adapter_class, \
-             patch('asyncio.sleep') as mock_sleep, \
-             patch('builtins.print') as mock_print:
-
+        with (
+            patch("adapters.discord_adapter.DiscordAdapter") as mock_adapter_class,
+            patch("asyncio.sleep") as mock_sleep,
+            patch("builtins.print") as mock_print,
+        ):
             # Set up mock adapter
             mock_adapter = Mock()
             mock_adapter_class.return_value = mock_adapter
@@ -1898,6 +2025,7 @@ class TestDiscordAdapter:
 
             # Import and call main
             from adapters.discord_adapter import main
+
             await main()
 
             # Verify adapter was created and initialized
@@ -1910,13 +2038,27 @@ class TestDiscordAdapter:
 
     def test_main_block_execution(self):
         """Test if __name__ == '__main__' block executes main()"""
-        with patch('adapters.discord_adapter.main') as mock_main, \
-             patch('asyncio.run') as mock_asyncio_run:
-
+        with (
+            patch("adapters.discord_adapter.main") as mock_main,
+            patch("asyncio.run") as mock_asyncio_run,
+        ):
             # Simulate running the module directly
             # The if __name__ == "__main__" block should have executed during import
 
             # Since we can't easily trigger the __main__ block without re-executing,
             # we'll verify the main function exists and can be imported
             from adapters.discord_adapter import main
+
             assert callable(main)
+
+    @pytest.mark.asyncio
+    async def test_ping_command_execution(self):
+        """Test ping slash command execution"""
+        from adapters.discord_adapter import ping
+
+        mock_interaction = AsyncMock()
+        mock_interaction.response.send_message = AsyncMock()
+
+        await ping(mock_interaction)
+
+        mock_interaction.response.send_message.assert_called_once_with("Pong!")

@@ -102,8 +102,8 @@ async def test_handle_approve_with_id(admin_handler):
     with patch.object(
         admin_handler, "_process_approval", new_callable=AsyncMock
     ) as mock_process:
-        result = await admin_handler._handle_approve(
-            ["!approve", "test_action"], "admin", "chat123", "platform"
+        result = await admin_handler.handle_command(
+            "!approve test_action", "admin_user", "chat123", "platform"
         )
         assert result is True
         mock_process.assert_called_once_with("test_action", approved=True)
@@ -479,3 +479,159 @@ async def test_trigger_voice_briefing_exception(admin_handler, mock_orchestrator
     mock_orchestrator.memory.chat_read.side_effect = Exception("Database error")
     await admin_handler._trigger_voice_briefing("+1234567890", "chat123", "platform")
     # Should not raise exception, just log it
+
+
+@pytest.mark.asyncio
+async def test_handle_policies_missing_dict(admin_handler, mock_orchestrator):
+    """Test _handle_allow and _handle_deny when policies dict is missing (lines 108, 123)"""
+    mock_orchestrator.config.policies = {}
+
+    # Test allow
+    await admin_handler._handle_allow(["!allow", "cmd1"], "a", "c", "p")
+    assert "cmd1" in mock_orchestrator.config.policies["allow"]
+
+    # Test deny
+    mock_orchestrator.config.policies = {}
+    await admin_handler._handle_deny(["!deny", "cmd2"], "a", "c", "p")
+    assert "cmd2" in mock_orchestrator.config.policies["deny"]
+
+
+@pytest.mark.asyncio
+async def test_handle_history_clean_no_chat(admin_handler):
+    """Test _handle_history_clean with no chat id (line 170)"""
+    # parts has only one element, and chat_id is None
+    result = await admin_handler._handle_history_clean(
+        ["!history_clean"], "a", None, "p"
+    )
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_handle_health_with_component_error(admin_handler, mock_orchestrator):
+    """Test _handle_health with component error (line 278)"""
+    mock_orchestrator.health_monitor.get_system_health.return_value = {
+        "test": {"status": "down", "error": "fatal error"}
+    }
+
+    await admin_handler._handle_health(["!health"], "a", "c", "p")
+
+    mock_orchestrator.send_platform_message.assert_called_once()
+    call_args = mock_orchestrator.send_platform_message.call_args[0][0]
+    assert "fatal error" in call_args.content
+
+
+@pytest.mark.asyncio
+async def test_execute_approved_action_system_command_coverage(admin_handler):
+    """Test _execute_approved_action with system_command (lines 318-339)"""
+    mock_ws = AsyncMock()
+    action = {
+        "type": "system_command",
+        "payload": {"params": {"command": "echo hello"}},
+        "websocket": mock_ws,
+        "description": "Test command",
+    }
+
+    with patch("subprocess.run") as mock_run:
+        # Success path
+        mock_run.return_value = MagicMock(returncode=0, stdout="hello", stderr="")
+        result = await admin_handler._execute_approved_action(action)
+        assert result == "hello"
+
+        # Error path (stderr)
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="failed")
+        result = await admin_handler._execute_approved_action(action)
+        assert result == "failed"
+
+
+@pytest.mark.asyncio
+async def test_execute_approved_action_exception_with_websocket(admin_handler):
+    """Test _execute_approved_action exception with websocket notification (line 394)"""
+    mock_ws = AsyncMock()
+    action = {
+        "type": "system_command",
+        "payload": {"params": {"command": "boom"}},
+        "websocket": mock_ws,
+        "description": "Exploding command",
+    }
+
+    with patch("subprocess.run", side_effect=Exception("Explosion")):
+        result = await admin_handler._execute_approved_action(action)
+        assert "Explosion" in result
+        mock_ws.send_json.assert_called_once()
+        call_args = mock_ws.send_json.call_args[0][0]
+        assert call_args["type"] == "action_error"
+        assert "Explosion" in call_args["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_approved_action_mcp_tool(admin_handler, mock_orchestrator):
+    """Test _execute_approved_action with mcp_tool (lines 343-355)"""
+    action = {
+        "type": "mcp_tool",
+        "payload": {"server": "s1", "tool": "t1", "params": {"p": "v"}},
+    }
+
+    mock_orchestrator.adapters["mcp"] = AsyncMock()
+    mock_orchestrator.adapters["mcp"].call_tool.return_value = "mcp result"
+    result = await admin_handler._execute_approved_action(action)
+    assert result == "mcp result"
+    mock_orchestrator.adapters["mcp"].call_tool.assert_called_once_with(
+        "s1", "t1", {"p": "v"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_approved_action_file_ops(admin_handler, tmp_path):
+    """Test _execute_approved_action with file_operation (lines 359-369)"""
+    test_file = tmp_path / "test.txt"
+
+    # 1. Write (line 366-369)
+    action_write = {
+        "type": "file_operation",
+        "payload": {
+            "operation": "write",
+            "path": str(test_file),
+            "content": "hello file",
+        },
+    }
+    result = await admin_handler._execute_approved_action(action_write)
+    assert "File written" in result
+    assert test_file.read_text() == "hello file"
+
+    # 2. Read (line 363-365)
+    action_read = {
+        "type": "file_operation",
+        "payload": {"operation": "read", "path": str(test_file)},
+    }
+    result = await admin_handler._execute_approved_action(action_read)
+    assert result == "hello file"
+
+
+@pytest.mark.asyncio
+async def test_execute_approved_action_generic_openclaw(
+    admin_handler, mock_orchestrator
+):
+    """Test _execute_approved_action with generic action routed to OpenClaw (lines 377-383)"""
+    action = {
+        "type": "generic",
+        "payload": {"method": "custom.method", "params": {"x": 1}},
+    }
+
+    # Set up openclaw adapter in mock orchestrator
+    mock_orchestrator.adapters["openclaw"] = AsyncMock()
+    mock_orchestrator.adapters["openclaw"].execute_tool.return_value = "openclaw result"
+
+    result = await admin_handler._execute_approved_action(action)
+    assert result == "openclaw result"
+    mock_orchestrator.adapters["openclaw"].execute_tool.assert_called_once_with(
+        "custom.method", {"x": 1}
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_approved_action_unknown_type(admin_handler, capsys):
+    """Test _execute_approved_action with unknown type (line 385)"""
+    action = {"type": "wizard_magic"}
+    await admin_handler._execute_approved_action(action)
+    captured = capsys.readouterr()
+    assert "Unknown action type: wizard_magic" in captured.out

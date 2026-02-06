@@ -136,3 +136,35 @@ class TestSubAgent:
         tool_names = [t["name"] for t in tools]
         assert "query_rag" in tool_names
         assert "read_file" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_run_list_response_no_tool_calls(self, mock_orchestrator):
+        """Test sub-agent run loop with list response but no tool calls (lines 77-80)"""
+        sub_agent = SubAgent("TestBot", "Senior Dev", "Say hello", mock_orchestrator)
+        sub_agent.plan = ["Step 1"]
+
+        # Mock list response with only text blocks
+        mock_orchestrator.llm.generate.return_value = [
+            {"type": "text", "text": "Hello "},
+            {"type": "text", "text": "there!"},
+        ]
+
+        result = await sub_agent.run()
+
+        assert result == "Hello there!"
+
+    @pytest.mark.asyncio
+    async def test_run_auto_generate_plan(self, mock_orchestrator):
+        """Test sub-agent run loop with auto plan generation (line 50)"""
+        sub_agent = SubAgent("TestBot", "Senior Dev", "Say hello", mock_orchestrator)
+        # plan is empty here
+
+        mock_orchestrator.llm.generate.side_effect = [
+            "1. Step one",  # response for generate_plan
+            "Hello world",  # response for run
+        ]
+
+        result = await sub_agent.run()
+
+        assert result == "Hello world"
+        assert sub_agent.plan == ["1. Step one"]

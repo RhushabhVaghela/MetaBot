@@ -315,3 +315,35 @@ async def test_cleanup_old_memories_no_old(knowledge_manager):
     # Memory should still exist
     memory = await knowledge_manager.read("recent_memory")
     assert memory is not None
+
+
+@pytest.mark.asyncio
+async def test_error_handlings_full(knowledge_manager):
+    """Test error handling in all methods (lines 63, 86, 119, 175, 193, 213, 239)"""
+    import unittest.mock
+
+    with unittest.mock.patch("sqlite3.connect") as mock_connect:
+        mock_connect.side_effect = Exception("DB Error")
+
+        # write error (63-65)
+        res = await knowledge_manager.write("k", "t", "c")
+        assert "Error writing memory" in res
+
+        # read error (86-88)
+        assert await knowledge_manager.read("k") is None
+
+        # search error (119-121)
+        assert await knowledge_manager.search() == []
+
+        # delete error (175-177)
+        assert await knowledge_manager.delete("k") is False
+
+        # update_tags error (193-195)
+        assert await knowledge_manager.update_tags("k", []) is False
+
+        # get_stats error (213-215)
+        stats = await knowledge_manager.get_stats()
+        assert "error" in stats
+
+        # cleanup_old_memories error (239-241)
+        assert await knowledge_manager.cleanup_old_memories() == 0

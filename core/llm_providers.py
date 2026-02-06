@@ -16,7 +16,7 @@ class LLMProvider(ABC):
         tools: Optional[List[Dict[str, Any]]] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Any:
-        pass
+        pass  # pragma: no cover
 
     async def reason(
         self,

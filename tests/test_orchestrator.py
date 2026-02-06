@@ -786,3 +786,65 @@ async def test_health_endpoint():
 
     result = await health()
     assert result == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_admin_loki_trigger(orchestrator):
+    """Test !mode loki triggers loki activation (line 355)"""
+    orchestrator.config.admins = ["admin"]
+    with patch.object(
+        orchestrator.loki, "activate", new_callable=AsyncMock
+    ) as mock_activate:
+        await orchestrator._handle_admin_command("!mode loki", "admin")
+        # Give it a tiny bit of time for the task to start
+        await asyncio.sleep(0.01)
+        mock_activate.assert_called_once_with("Auto-trigger from chat")
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_health_with_error(orchestrator):
+    """Test !health command and get_system_health with error (lines 453, 618-619)"""
+    orchestrator.config.admins = ["admin"]
+
+    # 1. Make memory.memory_stats raise exception (lines 618-619)
+    orchestrator.memory.memory_stats.side_effect = Exception("Stats failed")
+
+    health_data = await orchestrator.get_system_health()
+    assert health_data["memory"]["status"] == "down"
+    assert "Stats failed" in health_data["memory"]["error"]
+
+    # 2. Test !health display with error (line 453)
+    # We mock get_system_health to return a component with an error
+    with patch.object(
+        orchestrator, "get_system_health", new_callable=AsyncMock
+    ) as mock_health:
+        mock_health.return_value = {
+            "test": {"status": "down", "error": "simulated error"}
+        }
+
+        with patch.object(
+            orchestrator, "send_platform_message", new_callable=AsyncMock
+        ) as mock_send:
+            await orchestrator._handle_admin_command("!health", "admin")
+            await asyncio.sleep(0.01)
+
+            # Check the message content
+            call_args = mock_send.call_args[0][0]
+            assert "simulated error" in call_args.content
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_start_rag_print(orchestrator):
+    """Test RAG build print and exception (lines 541-542)"""
+    with patch("builtins.print") as mock_print:
+        # Success path (line 541)
+        orchestrator.rag.build_index = AsyncMock()
+        await orchestrator.start()
+        mock_print.assert_any_call(
+            f"Project RAG index built for: {orchestrator.rag.root_dir}"
+        )
+
+        # Exception path (line 542)
+        orchestrator.rag.build_index.side_effect = Exception("RAG Error")
+        await orchestrator.start()
+        mock_print.assert_any_call("Failed to build RAG index: RAG Error")

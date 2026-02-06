@@ -291,3 +291,26 @@ async def test_forget_error_handling(chat_manager):
 
         result = await chat_manager.forget("error_chat")
         assert result is False
+
+
+@pytest.mark.asyncio
+async def test_get_all_chat_ids_error_handling(chat_manager):
+    """Test error handling in get_all_chat_ids (lines 186-188)"""
+    import unittest.mock
+
+    with unittest.mock.patch("sqlite3.connect") as mock_connect:
+        mock_connect.side_effect = Exception("DB Error")
+        chat_ids = await chat_manager.get_all_chat_ids()
+        assert chat_ids == []
+
+
+@pytest.mark.asyncio
+async def test_get_chat_stats_error_handling(chat_manager):
+    """Test error handling in get_chat_stats (lines 203-205)"""
+    import unittest.mock
+
+    with unittest.mock.patch("sqlite3.connect") as mock_connect:
+        mock_connect.side_effect = Exception("DB Error")
+        stats = await chat_manager.get_chat_stats("chat123")
+        assert "error" in stats
+        assert "DB Error" in stats["error"]

@@ -775,22 +775,32 @@ class TestSlackAdapter:
         mock_req.envelope_id = "test_envelope"
         mock_req.payload = {
             "type": "event_callback",
-            "event": {"type": "message", "text": "test"}
+            "event": {"type": "message", "text": "test"},
         }
 
-        with patch.object(slack_adapter, "_handle_event", new_callable=AsyncMock) as mock_handle_event:
-            with patch("adapters.slack_adapter.SocketModeResponse") as mock_response_class:
+        with patch.object(
+            slack_adapter, "_handle_event", new_callable=AsyncMock
+        ) as mock_handle_event:
+            with patch(
+                "adapters.slack_adapter.SocketModeResponse"
+            ) as mock_response_class:
                 mock_response = MagicMock()
                 mock_response_class.return_value = mock_response
                 await slack_adapter._handle_socket_request(mock_req)
 
-                mock_handle_event.assert_called_once_with({"type": "message", "text": "test"})
-                mock_socket_client.client.send_socket_mode_response.assert_called_once_with(mock_response)
+                mock_handle_event.assert_called_once_with(
+                    {"type": "message", "text": "test"}
+                )
+                mock_socket_client.client.send_socket_mode_response.assert_called_once_with(
+                    mock_response
+                )
 
     @pytest.mark.asyncio
     async def test_handle_event_custom_handler_exception(self, slack_adapter):
         """Test _handle_event with custom handler exception"""
-        slack_adapter.event_handlers["custom_event"] = MagicMock(side_effect=Exception("handler error"))
+        slack_adapter.event_handlers["custom_event"] = MagicMock(
+            side_effect=Exception("handler error")
+        )
 
         await slack_adapter._handle_event({"type": "custom_event"})
 
@@ -803,7 +813,9 @@ class TestSlackAdapter:
 
         # Test skip bot user
         event = {"user": "U123", "text": "bot message"}
-        with patch.object(slack_adapter, "_to_platform_message", new_callable=AsyncMock) as mock_to_msg:
+        with patch.object(
+            slack_adapter, "_to_platform_message", new_callable=AsyncMock
+        ) as mock_to_msg:
             await slack_adapter._handle_message_event(event)
             mock_to_msg.assert_not_called()
 
@@ -815,10 +827,14 @@ class TestSlackAdapter:
     @pytest.mark.asyncio
     async def test_handle_message_event_handler_exception(self, slack_adapter):
         """Test _handle_message_event with handler exception"""
-        slack_adapter.message_handlers = [MagicMock(side_effect=Exception("handler error"))]
+        slack_adapter.message_handlers = [
+            MagicMock(side_effect=Exception("handler error"))
+        ]
 
         event = {"user": "U456", "text": "test message"}
-        with patch.object(slack_adapter, "_to_platform_message", new_callable=AsyncMock) as mock_to_msg:
+        with patch.object(
+            slack_adapter, "_to_platform_message", new_callable=AsyncMock
+        ) as mock_to_msg:
             mock_to_msg.return_value = MagicMock()
             await slack_adapter._handle_message_event(event)
 
@@ -827,7 +843,9 @@ class TestSlackAdapter:
     @pytest.mark.asyncio
     async def test_handle_reaction_event_handler_exception(self, slack_adapter):
         """Test _handle_reaction_event with handler exception"""
-        slack_adapter.reaction_handlers = [MagicMock(side_effect=Exception("handler error"))]
+        slack_adapter.reaction_handlers = [
+            MagicMock(side_effect=Exception("handler error"))
+        ]
 
         event = {"type": "reaction_added", "reaction": "thumbsup"}
         await slack_adapter._handle_reaction_event(event, "add")
@@ -837,7 +855,10 @@ class TestSlackAdapter:
     @pytest.mark.asyncio
     async def test_get_channel_info_api_failure(self, slack_adapter, mock_client):
         """Test get_channel_info when API call fails"""
-        mock_client.conversations_info.return_value = {"ok": False, "error": "channel_not_found"}
+        mock_client.conversations_info.return_value = {
+            "ok": False,
+            "error": "channel_not_found",
+        }
 
         result = await slack_adapter.get_channel_info("C123")
         assert result is None
@@ -856,7 +877,9 @@ class TestSlackAdapter:
         with patch("builtins.print") as mock_print:
             result = await slack_adapter.download_media("msg123", "/path")
             assert result is None
-            mock_print.assert_called_with("[Slack] Download media not implemented for message msg123")
+            mock_print.assert_called_with(
+                "[Slack] Download media not implemented for message msg123"
+            )
 
     def test_generate_id(self, slack_adapter):
         """Test _generate_id method"""
@@ -869,63 +892,65 @@ class TestSlackAdapter:
         """Test that _init_socket_mode executes the decorator and function"""
         slack_adapter.app_token = "xapp-test-token"
 
-        with patch("adapters.slack_adapter.SocketModeClient") as mock_socket_mode_client:
+        with patch(
+            "adapters.slack_adapter.SocketModeClient"
+        ) as mock_socket_mode_client:
             mock_socket_client_instance = MagicMock()
             mock_socket_mode_client.return_value = mock_socket_client_instance
             mock_socket_client_instance.client.connect = MagicMock()
 
-            # This should execute the decorator and function definition on line 162
+            # Capture the listener function
+            captured_listener = None
+
+            def mock_decorator(func):
+                nonlocal captured_listener
+                captured_listener = func
+                return func
+
+            mock_socket_client_instance.socket_mode_request_listener = mock_decorator
+
+            # This should execute the decorator
             await slack_adapter._init_socket_mode()
 
-            # Configure the mock listener to call _handle_socket_request
-            async def mock_listener(client, req):
-                await slack_adapter._handle_socket_request(req)
-            
-            mock_socket_client_instance.socket_mode_request_listener = mock_listener
-            
-            # Now call the decorated function to execute line 162
+            # Now call the decorated function
+            assert captured_listener is not None
             mock_req = MagicMock()
-            mock_req.type = "events_api"
-            mock_req.envelope_id = "test_envelope"
-            mock_req.payload = {
-                "type": "event_callback",
-                "event": {"type": "message", "text": "test"}
-            }
-            
-            with patch.object(slack_adapter, "_handle_event") as mock_handle_event:
-                with patch("adapters.slack_adapter.SocketModeResponse") as mock_response_class:
-                    mock_response = MagicMock()
-                    mock_response_class.return_value = mock_response
-                    
-                    # Call the decorated function (this executes line 162)
-                    listener = mock_socket_client_instance.socket_mode_request_listener
-                    await listener(mock_socket_client_instance, mock_req)
-                    
-                    # Verify _handle_event was called (line 162 executed)
-                    mock_handle_event.assert_called_once_with({"type": "message", "text": "test"})
+            with patch.object(
+                slack_adapter, "_handle_socket_request", new_callable=AsyncMock
+            ) as mock_handle:
+                await captured_listener(mock_socket_client_instance, mock_req)
+                mock_handle.assert_called_once_with(mock_req)
 
     @pytest.mark.asyncio
     async def test_download_media_actual_exception_handling(self, slack_adapter):
         """Test exception handling in download_media"""
         # Patch the print function to raise an exception when called from download_media
         original_print = builtins.print
-        
+
         def failing_print(*args, **kwargs):
-            if len(args) > 0 and str(args[0]).startswith("[Slack] Download media not implemented"):
+            if len(args) > 0 and str(args[0]).startswith(
+                "[Slack] Download media not implemented"
+            ):
                 raise Exception("Simulated print error")
             return original_print(*args, **kwargs)
-        
-        with patch('builtins.print', side_effect=failing_print):
+
+        with patch("builtins.print", side_effect=failing_print):
             result = await slack_adapter.download_media("msg123", "/path")
             assert result is None
 
-    def test_slack_sdk_import_fallback_execution(self):
-        """Test that slack_sdk import fallback code executes"""
-        # The fallback should already be set at module level
-        # Check that fallback values are set (lines 21-25)
-        from adapters import slack_adapter
-        assert slack_adapter.slack_sdk is not None  # This is the Any type
-        assert slack_adapter.WebClient is not None
-        assert slack_adapter.SocketModeClient is not None
-        assert slack_adapter.SocketModeRequest is not None
-        assert slack_adapter.SocketModeResponse is not None
+    def test_slack_sdk_fallback_full_coverage(self):
+        """Test the fallback mocks in slack_adapter for full coverage (lines 27, 30, 34)"""
+        with patch.dict("sys.modules", {"slack_sdk": None}):
+            import importlib
+            import adapters.slack_adapter
+
+            importlib.reload(adapters.slack_adapter)
+
+            # Now test the fallback classes
+            client = adapters.slack_adapter.WebClient(token="test")
+            # This triggers __getattr__ (line 30)
+            result = client.any_method()
+            assert isinstance(result, MagicMock)
+
+            socket_client = adapters.slack_adapter.SocketModeClient(app_token="test")
+            assert socket_client is not None

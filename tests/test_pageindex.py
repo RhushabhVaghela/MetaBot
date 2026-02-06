@@ -287,3 +287,73 @@ Fourth line
         with patch("builtins.open", side_effect=Exception("read error")):
             result = await page_index.get_file_context("src/main.py")
             assert "Error reading file" in result
+
+
+@pytest.mark.asyncio
+async def test_build_index_cache_errors(page_index, temp_dir):
+    """Test cache load and save errors in build_index (lines 28-29, 42-43)"""
+    page_index.index_path = os.path.join(temp_dir, "error_index.json")
+
+    # 1. Load cache error (lines 28-29)
+    with open(page_index.index_path, "w") as f:
+        f.write("invalid json")
+
+    with patch("builtins.print") as mock_print:
+        # Should build from scratch if cache load fails
+        await page_index.build_index(force_rebuild=False)
+        assert any(
+            "RAG: Failed to load cache:" in str(arg)
+            for call in mock_print.call_args_list
+            for arg in call.args
+        )
+
+    # 2. Save cache error (lines 42-43)
+    # Re-build to trigger save
+    with patch("os.path.exists", return_value=False):
+        with patch("builtins.open", side_effect=Exception("Save error")):
+            with patch("builtins.print") as mock_print:
+                await page_index.build_index(force_rebuild=True)
+                assert any(
+                    "RAG: Failed to save cache:" in str(arg)
+                    for call in mock_print.call_args_list
+                    for arg in call.args
+                )
+
+
+@pytest.mark.asyncio
+async def test_walk_and_index_read_error(page_index, temp_dir):
+    """Test _walk_and_index with file read error (lines 77-78)"""
+    # Create a file and make it unreadable
+    unreadable_file = os.path.join(temp_dir, "unreadable.py")
+    with open(unreadable_file, "w") as f:
+        f.write("content")
+
+    with patch("builtins.open", side_effect=Exception("Read error")):
+        page_index.index = {"files": {}, "folders": {}}
+        page_index._walk_and_index(temp_dir, page_index.index)
+        # Should continue and not crash, and file should not be in index
+        assert "unreadable.py" not in page_index.index["files"]
+
+
+@pytest.mark.asyncio
+async def test_navigate_auto_build_index(page_index):
+    """Test navigate calls build_index if index is empty (line 110)"""
+    page_index.index = {}
+    with patch.object(page_index, "build_index", new_callable=AsyncMock) as mock_build:
+        await page_index.navigate("test")
+        mock_build.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reasoned_navigation_no_paths_found(page_index):
+    """Test _reasoned_navigation when no paths are found in LLM response (line 165)"""
+    page_index.llm = AsyncMock()
+    page_index.llm.generate.return_value = "No paths here"
+    page_index.index = {
+        "files": {"test.py": {"summary": "s", "headers": []}},
+        "folders": {},
+    }
+
+    with patch.object(page_index, "_keyword_navigation") as mock_keyword:
+        await page_index._reasoned_navigation("query")
+        mock_keyword.assert_called_once()
