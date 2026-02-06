@@ -8,13 +8,32 @@ import threading
 
 logger = logging.getLogger("megabot.memory.knowledge")
 
+# Whitelist of allowed ORDER BY clauses to prevent SQL injection
+_ALLOWED_ORDER_BY = frozenset(
+    {
+        "updated_at DESC",
+        "updated_at ASC",
+        "created_at DESC",
+        "created_at ASC",
+        "key DESC",
+        "key ASC",
+        "type DESC",
+        "type ASC",
+    }
+)
+
 
 class KnowledgeMemoryManager:
     """Manages general knowledge and learned lessons with advanced search capabilities."""
 
-    def __init__(self, db_path: str):
+    def __init__(
+        self,
+        db_path: str,
+        executor: Optional[concurrent.futures.ThreadPoolExecutor] = None,
+    ):
         self.db_path = db_path
-        self._executor = concurrent.futures.ThreadPoolExecutor(
+        # Accept a shared executor or create a private one
+        self._executor = executor or concurrent.futures.ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="knowledge_db"
         )
         self._local = threading.local()
@@ -56,7 +75,8 @@ class KnowledgeMemoryManager:
         """Record new knowledge or decisions."""
         tags_json = json.dumps(tags or [])
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
                 self._executor, self._sync_write, key, type, content, tags_json
             )
             return result
@@ -80,9 +100,8 @@ class KnowledgeMemoryManager:
     async def read(self, key: str) -> Optional[Dict[str, Any]]:
         """Retrieve specific memory content by key."""
         try:
-            return await asyncio.get_event_loop().run_in_executor(
-                self._executor, self._sync_read, key
-            )
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(self._executor, self._sync_read, key)
         except Exception as e:
             logger.error(f"Error reading memory '{key}': {e}")
             return None
@@ -113,7 +132,8 @@ class KnowledgeMemoryManager:
     ) -> List[Dict[str, Any]]:
         """Search for memories by query, type, or tags with advanced filtering."""
         try:
-            return await asyncio.get_event_loop().run_in_executor(
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
                 self._executor, self._sync_search, query, type, tags, limit, order_by
             )
         except Exception as e:
@@ -139,6 +159,10 @@ class KnowledgeMemoryManager:
         if type:
             sql += " AND type = ?"
             params.append(type)
+
+        # Validate order_by against whitelist to prevent SQL injection
+        if order_by not in _ALLOWED_ORDER_BY:
+            order_by = "updated_at DESC"
 
         sql += f" ORDER BY {order_by}"
 
@@ -169,9 +193,8 @@ class KnowledgeMemoryManager:
     async def delete(self, key: str) -> bool:
         """Delete a memory by key."""
         try:
-            return await asyncio.get_event_loop().run_in_executor(
-                self._executor, self._sync_delete, key
-            )
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(self._executor, self._sync_delete, key)
         except Exception as e:
             logger.error(f"Error deleting memory '{key}': {e}")
             return False
@@ -187,7 +210,8 @@ class KnowledgeMemoryManager:
         """Update tags for an existing memory."""
         tags_json = json.dumps(tags)
         try:
-            return await asyncio.get_event_loop().run_in_executor(
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
                 self._executor, self._sync_update_tags, key, tags_json
             )
         except Exception as e:
@@ -207,9 +231,8 @@ class KnowledgeMemoryManager:
     async def get_stats(self) -> Dict[str, Any]:
         """View analytics on memory usage."""
         try:
-            return await asyncio.get_event_loop().run_in_executor(
-                self._executor, self._sync_get_stats
-            )
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(self._executor, self._sync_get_stats)
         except Exception as e:
             logger.error(f"Error getting memory stats: {e}")
             return {"error": str(e)}
@@ -233,7 +256,8 @@ class KnowledgeMemoryManager:
     async def cleanup_old_memories(self, days_old: int = 365) -> int:
         """Remove memories older than specified days (except critical ones)."""
         try:
-            return await asyncio.get_event_loop().run_in_executor(
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
                 self._executor, self._sync_cleanup_old_memories, days_old
             )
         except Exception as e:
@@ -243,12 +267,15 @@ class KnowledgeMemoryManager:
     def _sync_cleanup_old_memories(self, days_old: int) -> int:
         """Synchronous cleanup operation."""
         conn = self._get_connection()
+        # Use parameterized query to prevent SQL injection
+        # (days_old is cast to int for defense-in-depth even though type-hinted)
         cursor = conn.execute(
             """
             DELETE FROM memories
-            WHERE updated_at < datetime('now', '-{} days')
+            WHERE updated_at < datetime('now', ?)
             AND type != 'learned_lesson'
-            """.format(days_old)
+            """,
+            (f"-{int(days_old)} days",),
         )
         conn.commit()
         return cursor.rowcount

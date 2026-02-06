@@ -11,6 +11,8 @@ MegaBot is a production-ready, local-first AI assistant that unifies the world's
 - [🐳 Quick Start](#-quick-start)
 - [📚 Documentation](#-documentation)
 - [🔧 Architecture](#-architecture)
+- [🖥️ UI Layer](#️-ui-layer)
+- [📦 Feature Modules](#-feature-modules)
 - [🔒 Security Model](#-security-model)
 - [🧪 Testing](#-testing)
 - [🤝 Contributing](#-contributing)
@@ -172,6 +174,9 @@ MegaBot/
 │   ├── gateway/            # Network gateways
 │   └── security/           # Security adapters
 ├── features/               # Feature modules
+│   ├── dash_data/          # DashDataAgent (CSV/JSON analysis)
+│   └── *_README.md         # Integrated project documentation
+├── ui/                     # Vite 7 + React 19 + Tailwind 4
 └── api/                    # REST endpoints
 ```
 
@@ -184,6 +189,40 @@ MegaBot/
 5. **Tool Execution** → MCP servers or native tools
 6. **Response Generation** → LLM generates response
 7. **Platform Delivery** → Response sent back via appropriate adapter
+
+---
+
+## 🖥️ UI Layer
+
+MegaBot includes a local-first dashboard built with modern frontend tooling:
+
+| Technology | Version | Role |
+|------------|---------|------|
+| Vite | 7.2 | Build tool & dev server |
+| React | 19.2 | Component framework |
+| Tailwind CSS | 4.1 | Utility-first styling |
+| TypeScript | 5.9 | Type safety |
+| Vitest | 4.0 | Unit & component testing |
+| React Testing Library | — | DOM interaction tests |
+
+```bash
+# Dev server
+cd ui && npm run dev
+
+# Run UI tests
+cd ui && npx vitest run
+```
+
+---
+
+## 📦 Feature Modules
+
+The `features/` directory contains specialized modules and integrated project documentation:
+
+- **`dash_data/agent.py`** — DashDataAgent for CSV/JSON analysis with sandboxed Python execution
+- **`*_README.md`** — Integrated documentation for 8 sub-projects: DASH, TIRITH, MEMU, OPENCLAW, NANOBOT, PAGE_INDEX, AGENT_LIGHTNING, AGENT_ZERO
+
+See [docs/features.md](docs/features.md) for the full deep-dive.
 
 ---
 
@@ -223,7 +262,7 @@ pytest tests/test_orchestrator.py
 
 ### Test Coverage
 - **Backend (Python)**: `pytest --cov --cov-report=term-missing`
-- **Current**: 840 tests passing across all core modules (**100% coverage**)
+- **Current**: 1373 tests passing across all core modules (**~96% coverage**)
 - **Components**: Core components, adapters, async testing with proper mocking
 
 ---

@@ -8,6 +8,19 @@ class TirithGuard:
     Protects against ANSI escape injection and homoglyph attacks in terminal output.
     """
 
+    # Bi-directional control characters used in RLO/homograph attacks.
+    # Defined once as a class constant to avoid per-call list allocation.
+    _BIDI_CHARS = frozenset(
+        (
+            "\u202e",  # RLO
+            "\u202d",  # LRO
+            "\u202b",  # RLE
+            "\u202a",  # LRE
+            "\u200f",  # RLM
+            "\u200e",  # LRM
+        )
+    )
+
     def __init__(self):
         # ANSI escape sequence regex
         self.ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -65,15 +78,7 @@ class TirithGuard:
 
         # Check for Right-to-Left Override (RLO) \u202E and other bi-di control chars
         # These can be used to hide extensions (e.g. exe.txt[RLO]cod.bat -> tab.doc.txt.exe)
-        bidi_chars = [
-            "\u202e",  # RLO
-            "\u202d",  # LRO
-            "\u202b",  # RLE
-            "\u202a",  # LRE
-            "\u200f",  # RLM
-            "\u200e",  # LRM
-        ]
-        if any(char in text for char in bidi_chars):
+        if any(char in text for char in self._BIDI_CHARS):
             return False
 
         return True

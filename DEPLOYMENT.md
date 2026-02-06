@@ -24,7 +24,7 @@ The fastest way to get MegaBot running locally.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/MegaBot.git
+   git clone https://github.com/RhushabhVaghela/MegaBot.git
    cd MegaBot
    ```
 
@@ -380,6 +380,6 @@ command: uvicorn core.orchestrator:app --host 0.0.0.0 --port 8000 --workers 4
 ## Support
 
 For issues and questions:
-- GitHub Issues: [MegaBot Issues](https://github.com/yourusername/MegaBot/issues)
+- GitHub Issues: [MegaBot Issues](https://github.com/RhushabhVaghela/MegaBot/issues)
 - Documentation: [docs/](./docs/)
 - Troubleshooting Guide: [docs/troubleshooting.md](./docs/troubleshooting.md)

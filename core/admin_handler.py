@@ -5,10 +5,12 @@ Handles administrative commands and system management.
 
 from typing import Dict, Any, Optional
 import asyncio
+import shlex
 import uuid
 import importlib.util
 import os
 from datetime import datetime
+from pathlib import Path
 
 from core.dependencies import resolve_service
 from core.config import Config
@@ -19,6 +21,35 @@ from core.memory.mcp_server import MemoryServer
 
 class AdminHandler:
     """Handles administrative commands and system management."""
+
+    # Allowlist of safe commands that can be executed via system_command.
+    # Each entry is the base executable name (no path, no args).
+    ALLOWED_COMMANDS = {
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "df",
+        "du",
+        "free",
+        "uptime",
+        "whoami",
+        "date",
+        "ps",
+        "top",
+        "echo",
+        "wc",
+        "uname",
+        "pip",
+        "python",
+        "node",
+        "npm",
+        "git",
+    }
+
+    # Allowed base directory for file_operation (resolved to absolute).
+    # Restricts file reads/writes to the project root and below.
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
     def __init__(self, orchestrator):
         self.orchestrator = orchestrator
@@ -314,29 +345,47 @@ class AdminHandler:
 
         try:
             if action_type == "system_command":
-                # Execute shell command
                 import subprocess
 
                 command = payload.get("params", {}).get("command", "")
-                if command:
-                    result = subprocess.run(
-                        command, shell=True, capture_output=True, text=True, timeout=30
-                    )
-                    output = result.stdout if result.returncode == 0 else result.stderr
-                    print(f"✅ Command executed:\n{output}")
+                if not command:
+                    return "No command provided"
 
-                    # Send result back via WebSocket if available
-                    websocket = action.get("websocket")
-                    if websocket:
-                        await websocket.send_json(
-                            {
-                                "type": "command_result",
-                                "command": command,
-                                "output": output,
-                                "success": result.returncode == 0,
-                            }
-                        )
-                    return output
+                # Parse with shlex to avoid shell injection; reject unparseable input
+                try:
+                    args = shlex.split(command)
+                except ValueError as e:
+                    return f"❌ Invalid command syntax: {e}"
+
+                if not args:
+                    return "No command provided"
+
+                # Validate executable against allowlist
+                executable = os.path.basename(args[0])
+                if executable not in self.ALLOWED_COMMANDS:
+                    msg = f"❌ Command '{executable}' is not in the allowed list: {sorted(self.ALLOWED_COMMANDS)}"
+                    print(msg)
+                    return msg
+
+                # Execute without shell=True to prevent injection
+                result = subprocess.run(
+                    args, shell=False, capture_output=True, text=True, timeout=30
+                )
+                output = result.stdout if result.returncode == 0 else result.stderr
+                print(f"✅ Command executed:\n{output}")
+
+                # Send result back via WebSocket if available
+                websocket = action.get("websocket")
+                if websocket:
+                    await websocket.send_json(
+                        {
+                            "type": "command_result",
+                            "command": command,
+                            "output": output,
+                            "success": result.returncode == 0,
+                        }
+                    )
+                return output
 
             elif action_type == "mcp_tool":
                 # Execute MCP tool
@@ -355,18 +404,30 @@ class AdminHandler:
                     return result
 
             elif action_type == "file_operation":
-                # File read/write operations
+                # File read/write operations — restricted to PROJECT_ROOT
                 operation = payload.get("operation")
-                file_path = payload.get("path")
-                content = payload.get("content")
+                raw_path = payload.get("path", "")
+                content = payload.get("content", "")
+
+                if not raw_path:
+                    return "❌ No file path provided"
+
+                # Resolve to absolute and ensure it's within PROJECT_ROOT
+                resolved = Path(raw_path).resolve()
+                if not str(resolved).startswith(str(self.PROJECT_ROOT)):
+                    msg = f"❌ Path traversal blocked: '{raw_path}' resolves outside project root"
+                    print(msg)
+                    return msg
 
                 if operation == "read":
-                    with open(file_path, "r") as f:
+                    with open(resolved, "r") as f:
                         return f.read()
                 elif operation == "write":
-                    with open(file_path, "w") as f:
+                    with open(resolved, "w") as f:
                         f.write(content)
-                    return f"File written: {file_path}"
+                    return f"File written: {resolved}"
+                else:
+                    return f"❌ Unknown file operation: {operation}"
 
             else:
                 # Generic action - try to route through OpenClaw if available

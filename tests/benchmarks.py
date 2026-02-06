@@ -1,12 +1,15 @@
 """
-MegaBot Performance Benchmarks
-Measures throughput and latency for core components
+MegaBot core component benchmarks.
+Run with: PYTHONPATH=. python -m pytest tests/benchmarks.py -v -s
 """
 
 import asyncio
 import time
 import json
 import os
+
+import pytest
+
 from adapters.messaging import (
     MegaBotMessagingServer,
     PlatformMessage,
@@ -15,52 +18,46 @@ from adapters.messaging import (
 from adapters.memu_adapter import MemUAdapter
 
 
-async def benchmark_encryption():
-    print("--- Encryption Benchmark ---")
+@pytest.mark.asyncio
+async def test_benchmark_encryption():
+    """1 000 encrypt/decrypt cycles of a 1 KB message under 2 s."""
     secure_ws = SecureWebSocket(password="benchmark-secret")
-    message = "A" * 1024  # 1KB message
+    message = "A" * 1024  # 1 KB
+    iterations = 1_000
 
-    start_time = time.time()
-    iterations = 1000
-
+    start = time.perf_counter()
     for _ in range(iterations):
         enc = secure_ws.encrypt(message)
-        dec = secure_ws.decrypt(enc)
+        secure_ws.decrypt(enc)
+    elapsed = time.perf_counter() - start
 
-    elapsed = time.time() - start_time
-    print(f"1KB Enc/Dec iterations: {iterations}")
-    print(f"Total time: {elapsed:.4f}s")
-    print(f"Average time: {(elapsed / iterations) * 1000:.4f}ms")
-    print(f"Throughput: {iterations / elapsed:.2f} ops/s")
+    throughput = iterations / elapsed
+    avg_ms = (elapsed / iterations) * 1000
+    print(f"\nEncryption: {throughput:,.0f} ops/s, avg {avg_ms:.4f}ms")
+    assert elapsed < 2.0, f"Encryption benchmark too slow: {elapsed:.2f}s"
 
 
-async def benchmark_memory_store():
-    print("\n--- Memory Store Benchmark ---")
-    # Use temporary DB
-    db_url = "sqlite:///benchmark.db"
-    adapter = MemUAdapter(memu_path="/tmp", db_url=db_url)
-
-    start_time = time.time()
+@pytest.mark.asyncio
+async def test_benchmark_memory_store(tmp_path):
+    """100 store() calls under 2 s."""
+    db_path = str(tmp_path / "benchmark.db")
+    adapter = MemUAdapter(memu_path="/tmp", db_url=f"sqlite:///{db_path}")
     iterations = 100
 
+    start = time.perf_counter()
     for i in range(iterations):
         await adapter.store(f"key_{i}", f"content_{i}")
+    elapsed = time.perf_counter() - start
 
-    elapsed = time.time() - start_time
-    print(f"Store iterations: {iterations}")
-    print(f"Total time: {elapsed:.4f}s")
-    print(f"Average latency: {(elapsed / iterations) * 1000:.4f}ms")
-
-    # Cleanup
-    if os.path.exists("benchmark.db"):
-        os.remove("benchmark.db")
+    avg_ms = (elapsed / iterations) * 1000
+    print(f"\nMemory store: {iterations} writes in {elapsed:.4f}s, avg {avg_ms:.4f}ms")
+    assert elapsed < 2.0, f"Memory store benchmark too slow: {elapsed:.2f}s"
 
 
-async def benchmark_messaging_throughput():
-    print("\n--- Messaging Throughput Benchmark ---")
+@pytest.mark.asyncio
+async def test_benchmark_messaging_throughput():
+    """500 serialize+encrypt+decrypt cycles under 2 s."""
     server = MegaBotMessagingServer(enable_encryption=True)
-
-    # Mock message
     msg = PlatformMessage(
         id="bench-1",
         platform="native",
@@ -69,63 +66,48 @@ async def benchmark_messaging_throughput():
         chat_id="chat-1",
         content="Hello world",
     )
-
-    start_time = time.time()
     iterations = 500
 
-    # Measure serialization + encryption overhead
+    start = time.perf_counter()
     for _ in range(iterations):
         data = json.dumps(msg.to_dict())
         if server.secure_ws:
             enc = server.secure_ws.encrypt(data)
             dec = server.secure_ws.decrypt(enc)
-            _ = json.loads(dec)
+            json.loads(dec)
         else:
-            _ = json.loads(data)
+            json.loads(data)
+    elapsed = time.perf_counter() - start
 
-    elapsed = time.time() - start_time
-    print(f"Message process iterations: {iterations}")
-    print(f"Total time: {elapsed:.4f}s")
-    print(f"Average latency: {(elapsed / iterations) * 1000:.4f}ms")
+    avg_ms = (elapsed / iterations) * 1000
+    print(
+        f"\nMessaging throughput: {iterations} ops in {elapsed:.4f}s, avg {avg_ms:.4f}ms"
+    )
+    assert elapsed < 2.0, f"Messaging throughput too slow: {elapsed:.2f}s"
 
 
-async def benchmark_layer_fetching():
-    print("\n--- Layer Fetching Benchmark (Progressive Retrieval) ---")
-    adapter = MemUAdapter(memu_path="/tmp", db_url="sqlite:///bench_layer.db")
+@pytest.mark.asyncio
+async def test_benchmark_layer_fetching(tmp_path):
+    """Layered fetch of 1 000 stored items in 10 batches under 5 s."""
+    db_path = str(tmp_path / "bench_layer.db")
+    adapter = MemUAdapter(memu_path="/tmp", db_url=f"sqlite:///{db_path}")
 
-    # 1. Fill with large amounts of data
-    for i in range(1000):
-        await adapter.store(f"item_{i}", "A" * 100)  # 100 bytes each
+    # Fill with data
+    for i in range(1_000):
+        await adapter.store(f"item_{i}", "A" * 100)
 
-    start_time = time.time()
-
-    # 2. Simulate Layered Fetching (Batch/Progressive)
-    total_fetched = 0
     batch_size = 100
-    for offset in range(0, 1000, batch_size):
-        # In a real system, this would be a paginated API call
-        # Here we simulate the overhead of selecting a 'layer' or 'range'
+    total_fetched = 0
+
+    start = time.perf_counter()
+    for offset in range(0, 1_000, batch_size):
         results = await adapter.search("item_")
         total_fetched += len(results[:batch_size])
+    elapsed = time.perf_counter() - start
 
-    elapsed = time.time() - start_time
-    print(f"Total layers (batches): {1000 / batch_size}")
-    print(f"Total items fetched: {total_fetched}")
-    print(f"Total time: {elapsed:.4f}s")
-    print(f"Latency per layer: {(elapsed / (1000 / batch_size)) * 1000:.4f}ms")
-
-    if os.path.exists("bench_layer.db"):
-        os.remove("bench_layer.db")
-
-
-async def run_all_benchmarks():
-    print("🚀 Starting MegaBot Benchmarks...")
-    await benchmark_encryption()
-    await benchmark_memory_store()
-    await benchmark_messaging_throughput()
-    await benchmark_layer_fetching()
-    print("\n✅ Benchmarks Completed.")
-
-
-if __name__ == "__main__":
-    asyncio.run(run_all_benchmarks())
+    num_layers = 1_000 / batch_size
+    layer_ms = (elapsed / num_layers) * 1000
+    print(
+        f"\nLayer fetching: {num_layers:.0f} batches in {elapsed:.4f}s, avg {layer_ms:.4f}ms/batch"
+    )
+    assert elapsed < 5.0, f"Layer fetching too slow: {elapsed:.2f}s"

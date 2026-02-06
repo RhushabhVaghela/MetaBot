@@ -549,7 +549,7 @@ async def test_execute_approved_action_exception_with_websocket(admin_handler):
     mock_ws = AsyncMock()
     action = {
         "type": "system_command",
-        "payload": {"params": {"command": "boom"}},
+        "payload": {"params": {"command": "echo boom"}},
         "websocket": mock_ws,
         "description": "Exploding command",
     }
@@ -585,26 +585,28 @@ async def test_execute_approved_action_file_ops(admin_handler, tmp_path):
     """Test _execute_approved_action with file_operation (lines 359-369)"""
     test_file = tmp_path / "test.txt"
 
-    # 1. Write (line 366-369)
-    action_write = {
-        "type": "file_operation",
-        "payload": {
-            "operation": "write",
-            "path": str(test_file),
-            "content": "hello file",
-        },
-    }
-    result = await admin_handler._execute_approved_action(action_write)
-    assert "File written" in result
-    assert test_file.read_text() == "hello file"
+    # Patch PROJECT_ROOT so tmp_path is considered within the allowed tree
+    with patch.object(type(admin_handler), "PROJECT_ROOT", tmp_path):
+        # 1. Write (line 366-369)
+        action_write = {
+            "type": "file_operation",
+            "payload": {
+                "operation": "write",
+                "path": str(test_file),
+                "content": "hello file",
+            },
+        }
+        result = await admin_handler._execute_approved_action(action_write)
+        assert "File written" in result
+        assert test_file.read_text() == "hello file"
 
-    # 2. Read (line 363-365)
-    action_read = {
-        "type": "file_operation",
-        "payload": {"operation": "read", "path": str(test_file)},
-    }
-    result = await admin_handler._execute_approved_action(action_read)
-    assert result == "hello file"
+        # 2. Read (line 363-365)
+        action_read = {
+            "type": "file_operation",
+            "payload": {"operation": "read", "path": str(test_file)},
+        }
+        result = await admin_handler._execute_approved_action(action_read)
+        assert result == "hello file"
 
 
 @pytest.mark.asyncio

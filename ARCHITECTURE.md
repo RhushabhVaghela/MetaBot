@@ -60,3 +60,5 @@ All sensitive actions pass through the **PermissionManager** and **Tirith Guard*
 | `adapters/` | `security/` | Command sanitization and Unicode attack prevention. |
 | `features/` | `dash_data/` | Specialized data analysis and Python execution engine. |
 | `features/` | `loki.py` | Autonomous "Loki Mode" for full-project implementation. |
+| `features/` | `*_README.md` | Integrated documentation for 8 sub-projects (DASH, TIRITH, MEMU, etc.). |
+| `ui/` | React frontend | Vite 7 + React 19 + Tailwind 4 dashboard with Vitest test suite. |

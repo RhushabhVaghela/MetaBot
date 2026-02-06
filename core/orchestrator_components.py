@@ -29,6 +29,7 @@ class MessageHandler:
         self.chat_contexts: Dict[
             str, List[Dict]
         ] = {}  # chat_id -> List[Dict] for recent conversation history
+        self._computer_driver = None  # Lazily cached DI resolution
 
     async def process_gateway_message(self, data: Dict):
         """Handle messages incoming from the Unified Gateway"""
@@ -105,7 +106,9 @@ class MessageHandler:
     ) -> str:
         """Process message attachments (images, audio) and return context."""
         vision_context = ""
-        computer_driver = resolve_service(ComputerDriver)
+        if self._computer_driver is None:
+            self._computer_driver = resolve_service(ComputerDriver)
+        computer_driver = self._computer_driver
 
         for attachment in attachments:
             if attachment.get("type") == "image":

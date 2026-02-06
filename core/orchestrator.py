@@ -53,9 +53,8 @@ def _safe_create_task(coro, name: Optional[str] = None):
     return task
 
 
-# Replace module-level create_task reference so existing calls in this file
-# use the defensive wrapper without editing every callsite.
-asyncio.create_task = _safe_create_task
+# _safe_create_task is used explicitly at each callsite below.
+# Do NOT monkey-patch asyncio.create_task globally.
 
 
 # Load Central API Credentials if file exists
@@ -330,9 +329,7 @@ class MegaBotOrchestrator:
         }
         self.adapters["messaging"].on_connect = self.on_messaging_connect
 
-    async def on_messaging_connect(
-        self, client_id: Optional[str], platform: str
-    ):  # pragma: no cover
+    async def on_messaging_connect(self, client_id: Optional[str], platform: str):
         """Handle new messaging platform connections.
 
         Sends a welcome message to newly connected clients explaining
@@ -340,11 +337,9 @@ class MegaBotOrchestrator:
 
         Args:
             client_id: Unique identifier for the connected client (optional)
-            platform: Platform name (telegram, signal, websocket, etc.)  # pragma: no cover
-        """  # pragma: no cover
-        print(
-            f"Greeting new connection: {platform} ({client_id or 'all'})"
-        )  # pragma: no cover
+            platform: Platform name (telegram, signal, websocket, etc.)
+        """
+        print(f"Greeting new connection: {platform} ({client_id or 'all'})")
         greeting = Message(content=GREETING_TEXT, sender="MegaBot")
         await self.send_platform_message(
             greeting, platform=platform, target_client=client_id
@@ -357,224 +352,10 @@ class MegaBotOrchestrator:
         chat_id: Optional[str] = None,
         platform: str = "native",
     ) -> bool:
-        """Process administrative commands from chat interfaces.
-
-        Handles MegaBot's administrative command system including:
-        - Action approval/denial (!approve, !deny)
-        - Persistent policy management (!allow, !deny)
-        - Identity linking (!link)
-        - System status checks (!health)
-        - Mode switching (!mode)
-
-        Args:
-            text: Raw command text from user
-            sender_id: Platform-specific sender identifier
-            chat_id: Chat/conversation identifier
-            platform: Messaging platform name
-
-        Returns:
-            bool: True if command was handled, False otherwise
-        """
-        """Process chat-based administrative commands"""
-        # Check if sender is an admin  # pragma: no cover
-        if self.config.admins and sender_id not in self.config.admins:
-            return False
-
-        parts = text.strip().split()  # pragma: no cover
-        if not parts:
-            return False
-        cmd = parts[0].lower()
-
-        if cmd == "!approve" or cmd == "!yes":
-            # Approve most recent or by ID
-            action_id = (
-                parts[1]
-                if len(parts) > 1
-                else (
-                    self.admin_handler.approval_queue[-1]["id"]
-                    if self.admin_handler.approval_queue
-                    else None
-                )
-            )
-            if action_id:
-                await self._process_approval(action_id, approved=True)
-                return True
-
-        elif cmd == "!reject" or cmd == "!no":
-            action_id = (
-                parts[1]
-                if len(parts) > 1
-                else (
-                    self.admin_handler.approval_queue[-1]["id"]
-                    if self.admin_handler.approval_queue
-                    else None
-                )
-            )
-            if action_id:
-                await self._process_approval(action_id, approved=False)
-                return True
-
-        elif cmd == "!allow":
-            if len(parts) > 1:
-                pattern = " ".join(parts[1:])
-                if pattern not in self.config.policies.get("allow", []):
-                    if "allow" not in self.config.policies:
-                        self.config.policies["allow"] = []
-                    self.config.policies["allow"].append(pattern)
-                    self.config.save()
-                    print(f"Policy Update: Allowed '{pattern}' (Persisted)")
-                    return True
-
-        elif cmd == "!deny":
-            if len(parts) > 1:
-                pattern = " ".join(parts[1:])
-                if pattern not in self.config.policies.get("deny", []):
-                    if "deny" not in self.config.policies:
-                        self.config.policies["deny"] = []
-                    self.config.policies["deny"].append(pattern)
-                    self.config.save()
-                    print(f"Policy Update: Denied '{pattern}' (Persisted)")
-                    return True
-
-        elif cmd == "!policies":
-            resp_text = f"Policies:\nAllow: {self.config.policies['allow']}\nDeny: {self.config.policies['deny']}"
-            resp = Message(
-                content=resp_text, sender="System", metadata={"chat_id": chat_id}
-            )
-            asyncio.create_task(self.send_platform_message(resp))
-            return True
-
-        elif cmd == "!mode":
-            if len(parts) > 1:
-                self.mode = parts[1]
-                print(f"System Mode updated to: {self.mode}")  # pragma: no cover
-                if self.mode == "loki":
-                    asyncio.create_task(self.loki.activate("Auto-trigger from chat"))
-                return True
-        # pragma: no cover
-        elif cmd == "!history_clean":  # pragma: no cover
-            target_chat = parts[1] if len(parts) > 1 else chat_id  # pragma: no cover
-            if target_chat:  # pragma: no cover
-                await self.memory.chat_forget(
-                    target_chat, max_history=0
-                )  # pragma: no cover
-                resp = Message(  # pragma: no cover
-                    content=f"🗑️ History cleaned for chat: {target_chat}",  # pragma: no cover
-                    sender="System",  # pragma: no cover
-                )  # pragma: no cover
-                asyncio.create_task(self.send_platform_message(resp, chat_id=chat_id))
-                return True
-        # pragma: no cover
-        elif cmd == "!link":  # pragma: no cover
-            if len(parts) > 1:  # pragma: no cover
-                target_name = parts[1]  # pragma: no cover
-                # Re-fetch the raw platform ID from metadata if possible,  # pragma: no cover
-                # but since we already resolved chat_id, we need to know the original.  # pragma: no cover
-                # In on_gateway_message, we resolved it.  # pragma: no cover
-                # Let's assume for this command we want to link the sender_id.  # pragma: no cover
-                await self.memory.link_identity(
-                    target_name, platform, sender_id
-                )  # pragma: no cover
-                resp = Message(  # pragma: no cover
-                    content=f"🔗 Identity Linked: {platform}:{sender_id} is now known as '{target_name}'",  # pragma: no cover
-                    sender="System",  # pragma: no cover
-                )  # pragma: no cover
-                asyncio.create_task(  # pragma: no cover
-                    self.send_platform_message(
-                        resp, chat_id=chat_id, platform=platform
-                    )  # pragma: no cover
-                )
-                return True
-
-        elif cmd == "!whoami":
-            unified = await self.memory.get_unified_id(platform, sender_id)
-            resp = Message(
-                content=f"👤 Identity Info:\nPlatform: {platform}\nID: {sender_id}\nUnified: {unified}",
-                sender="System",
-            )
-            asyncio.create_task(
-                self.send_platform_message(resp, chat_id=chat_id, platform=platform)
-            )
-            return True
-
-        elif cmd == "!backup":
-            res = await self.memory.backup_database()
-            resp = Message(
-                content=f"💾 Backup Triggered: {res}",
-                sender="System",
-            )
-            asyncio.create_task(
-                self.send_platform_message(resp, chat_id=chat_id, platform=platform)
-            )
-            return True
-
-        elif cmd == "!briefing":  # pragma: no cover
-            # Trigger a voice briefing call  # pragma: no cover
-            admin_phone = getattr(
-                self.config.system, "admin_phone", None
-            )  # pragma: no cover
-            if (
-                not admin_phone or not self.adapters["messaging"].voice_adapter
-            ):  # pragma: no cover
-                resp = Message(  # pragma: no cover
-                    content="❌ Briefing failed: No admin phone or voice adapter configured.",  # pragma: no cover
-                    sender="System",  # pragma: no cover
-                )  # pragma: no cover
-                asyncio.create_task(  # pragma: no cover
-                    self.send_platform_message(
-                        resp, chat_id=chat_id, platform=platform
-                    )  # pragma: no cover
-                )  # pragma: no cover
-                return True  # pragma: no cover
-            # pragma: no cover
-            asyncio.create_task(  # pragma: no cover
-                self._trigger_voice_briefing(
-                    admin_phone, str(chat_id), platform
-                )  # pragma: no cover
-            )  # pragma: no cover
-            resp = Message(  # pragma: no cover
-                content="📞 Voice briefing initiated. Expect a call shortly.",  # pragma: no cover
-                sender="System",  # pragma: no cover
-            )  # pragma: no cover
-            asyncio.create_task(  # pragma: no cover
-                self.send_platform_message(
-                    resp, chat_id=chat_id, platform=platform
-                )  # pragma: no cover
-            )
-            return True
-        # pragma: no cover
-        elif cmd == "!rag_rebuild":  # pragma: no cover
-            await self.rag.build_index(force_rebuild=True)  # pragma: no cover
-            resp = Message(  # pragma: no cover
-                content="🏗️ RAG Index rebuilt and cached.",  # pragma: no cover
-                sender="System",  # pragma: no cover
-            )  # pragma: no cover
-            asyncio.create_task(  # pragma: no cover
-                self.send_platform_message(
-                    resp, chat_id=chat_id, platform=platform
-                )  # pragma: no cover
-            )
-            return True
-
-        elif cmd == "!health":
-            health = await self.get_system_health()
-            health_text = "🩺 **System Health:**\n"
-            for comp, data in health.items():
-                status_emoji = "✅" if data["status"] == "up" else "❌"
-                health_text += f"- {status_emoji} **{comp.capitalize()}**: {data['status']}\n"  # pragma: no cover
-                if "error" in data:
-                    health_text += f"  - Error: {data['error']}\n"
-
-            resp = Message(
-                content=health_text,
-                sender="System",
-            )
-            asyncio.create_task(
-                self.send_platform_message(resp, chat_id=chat_id, platform=platform)
-            )
-            return True  # pragma: no cover
-
-        return False
+        """Delegate to AdminHandler (kept for backward compatibility)."""
+        return await self.admin_handler.handle_command(
+            text, sender_id, chat_id, platform
+        )
 
     async def on_gateway_message(self, data: Dict):
         """Process messages received through the unified gateway.
@@ -583,13 +364,11 @@ class MegaBotOrchestrator:
         connections through the same processing pipeline as native messaging.
 
         Args:
-            data: Message payload from gateway containing platform, content, etc.  # pragma: no cover
+            data: Message payload from gateway containing platform, content, etc.
         """
         await self.message_handler.process_gateway_message(data)
 
-    async def run_autonomous_gateway_build(
-        self, message: Message, original_data: Dict
-    ):  # pragma: no cover
+    async def run_autonomous_gateway_build(self, message: Message, original_data: Dict):
         """Execute autonomous build operations for gateway clients.
 
         Performs memory-augmented autonomous execution for clients connecting
@@ -628,44 +407,29 @@ class MegaBotOrchestrator:
         print(f"Starting {self.config.system.name} in {self.mode} mode...")
         self.discovery.scan()
 
-        # Start Native Messaging and Gateway (defensive scheduling)
-        try:
-            asyncio.create_task(self.adapters["messaging"].start())
-        except Exception:
-            try:
-                asyncio.ensure_future(self.adapters["messaging"].start())
-            except Exception:
-                pass
-
-        try:
-            asyncio.create_task(self.adapters["gateway"].start())
-        except Exception:
-            try:
-                asyncio.ensure_future(self.adapters["gateway"].start())
-            except Exception:
-                pass
+        # Start Native Messaging and Gateway as background tasks
+        _safe_create_task(self.adapters["messaging"].start())
+        _safe_create_task(self.adapters["gateway"].start())
 
         try:
             await self.adapters["openclaw"].connect(on_event=self.on_openclaw_event)
             await self.adapters["openclaw"].subscribe_events(
                 ["chat.message", "tool.call"]
-            )  # pragma: no cover
-            print("Connected to OpenClaw Gateway.")  # pragma: no cover
+            )
+            print("Connected to OpenClaw Gateway.")
         except Exception as e:
             print(f"Failed to connect to OpenClaw: {e}")
 
         try:
-            await self.adapters["mcp"].start_all()  # pragma: no cover
-            print("MCP Servers started.")  # pragma: no cover
+            await self.adapters["mcp"].start_all()
+            print("MCP Servers started.")
         except Exception as e:
             print(f"Failed to start MCP Servers: {e}")
 
         # Initialize Project RAG
         try:
-            await self.rag.build_index()  # pragma: no cover
-            print(
-                f"Project RAG index built for: {self.rag.root_dir}"
-            )  # pragma: no cover
+            await self.rag.build_index()
+            print(f"Project RAG index built for: {self.rag.root_dir}")
         except Exception as e:
             print(f"Failed to build RAG index: {e}")
 
@@ -761,15 +525,13 @@ class MegaBotOrchestrator:
                 )  # pragma: no cover
             elif name == "messaging":  # pragma: no cover
                 # Messaging server runs in background task, usually restart involves re-binding if crashed  # pragma: no cover
-                asyncio.create_task(
+                _safe_create_task(
                     self.adapters["messaging"].start()
                 )  # pragma: no cover
             elif name == "mcp":  # pragma: no cover
                 await self.adapters["mcp"].start_all()  # pragma: no cover
             elif name == "gateway":  # pragma: no cover
-                asyncio.create_task(
-                    self.adapters["gateway"].start()
-                )  # pragma: no cover
+                _safe_create_task(self.adapters["gateway"].start())  # pragma: no cover
             print(f"Self-Healing: {name} restart initiated.")  # pragma: no cover
         except Exception as e:
             print(f"Self-Healing Error: Failed to restart {name}: {e}")
@@ -803,7 +565,7 @@ class MegaBotOrchestrator:
                                 content=f"🚨 Component Down: {component}\nError: {data.get('error', 'Unknown')}\nAuto-restart triggered.",
                                 sender="Security",
                             )
-                            asyncio.create_task(self.send_platform_message(msg))
+                            _safe_create_task(self.send_platform_message(msg))
                     else:
                         # Reset restart count if component is back up
                         restart_counts[component] = 0
@@ -823,20 +585,20 @@ class MegaBotOrchestrator:
             stats = await self.memory.memory_stats()
             health["memory"] = {
                 "status": "up" if "error" not in stats else "down",
-                "details": stats,  # pragma: no cover
-            }  # pragma: no cover
+                "details": stats,
+            }
         except Exception as e:
             health["memory"] = {"status": "down", "error": str(e)}
 
         # 2. OpenClaw
-        try:  # pragma: no cover
+        try:
             is_connected = self.adapters["openclaw"].websocket is not None
             health["openclaw"] = {"status": "up" if is_connected else "down"}
         except Exception:
             health["openclaw"] = {"status": "down"}
 
         # 3. Messaging Server
-        try:  # pragma: no cover
+        try:
             client_count = len(self.adapters["messaging"].clients)
             health["messaging"] = {"status": "up", "clients": client_count}
         except Exception:
@@ -959,25 +721,23 @@ class MegaBotOrchestrator:
         except Exception as e:
             print(f"Voice briefing failed: {e}")
 
-    async def _verify_redaction(self, image_data: str) -> bool:  # pragma: no cover
-        """Use a separate vision pass to verify that redaction was successful"""  # pragma: no cover
-        try:  # pragma: no cover
-            # Re-analyze the image. The vision driver should return no sensitive_regions if successful.  # pragma: no cover
-            analysis_raw = await self.computer_driver.execute(  # pragma: no cover
+    async def _verify_redaction(self, image_data: str) -> bool:
+        """Use a separate vision pass to verify that redaction was successful"""
+        try:
+            # Re-analyze the image. The vision driver should return no sensitive_regions if successful.
+            analysis_raw = await self.computer_driver.execute(
                 "analyze_image",
-                text=image_data,  # pragma: no cover
-            )  # pragma: no cover
-            analysis = json.loads(analysis_raw)  # pragma: no cover
-            remaining_sensitive = analysis.get(
-                "sensitive_regions", []
-            )  # pragma: no cover
-            # pragma: no cover
-            if remaining_sensitive:  # pragma: no cover
-                print(  # pragma: no cover
-                    f"Redaction-Verification: FAILED. Found {len(remaining_sensitive)} remaining areas."  # pragma: no cover
-                )  # pragma: no cover
-                return False  # pragma: no cover
-            # pragma: no cover
+                text=image_data,
+            )
+            analysis = json.loads(analysis_raw)
+            remaining_sensitive = analysis.get("sensitive_regions", [])
+
+            if remaining_sensitive:
+                print(
+                    f"Redaction-Verification: FAILED. Found {len(remaining_sensitive)} remaining areas."
+                )
+                return False
+
             print("Redaction-Verification: PASSED.")
             return True
         except Exception as e:  # pragma: no cover
@@ -987,57 +747,51 @@ class MegaBotOrchestrator:
     async def _start_approval_escalation(self, action: Dict):
         """Escalate via Voice Call if approval is not received within 5 minutes"""
         await asyncio.sleep(300)  # 5 minutes
-        # pragma: no cover
-        # Check if action is still in queue  # pragma: no cover
-        if any(
-            a["id"] == action["id"] for a in self.admin_handler.approval_queue
-        ):  # pragma: no cover
-            print(  # pragma: no cover
-                f"Escalation: Approval {action['id']} timed out. Initiating Voice Call..."  # pragma: no cover
-            )  # pragma: no cover
-            # pragma: no cover
-            # Check DND Hours  # pragma: no cover
-            now = datetime.now().hour  # pragma: no cover
-            dnd_start = getattr(self.config.system, "dnd_start", 22)  # pragma: no cover
-            dnd_end = getattr(self.config.system, "dnd_end", 7)  # pragma: no cover
-            # pragma: no cover
-            is_dnd = False  # pragma: no cover
-            if dnd_start > dnd_end:  # pragma: no cover
-                is_dnd = now >= dnd_start or now < dnd_end  # pragma: no cover
-            else:  # pragma: no cover
-                is_dnd = dnd_start <= now < dnd_end  # pragma: no cover
-            # pragma: no cover
-            if is_dnd:  # pragma: no cover
-                print(
-                    "Escalation: DND active. Skipping voice call."
-                )  # pragma: no cover
-                return  # pragma: no cover
-            # pragma: no cover
-            # Check Dynamic DND via Calendar  # pragma: no cover
-            try:  # pragma: no cover
-                # Check for active calendar events that might indicate busy status  # pragma: no cover
-                events = await self.adapters["mcp"].call_tool(  # pragma: no cover
+
+        # Check if action is still in queue
+        if any(a["id"] == action["id"] for a in self.admin_handler.approval_queue):
+            print(
+                f"Escalation: Approval {action['id']} timed out. Initiating Voice Call..."
+            )
+
+            # Check DND Hours
+            now = datetime.now().hour
+            dnd_start = getattr(self.config.system, "dnd_start", 22)
+            dnd_end = getattr(self.config.system, "dnd_end", 7)
+
+            is_dnd = False
+            if dnd_start > dnd_end:
+                is_dnd = now >= dnd_start or now < dnd_end
+            else:
+                is_dnd = dnd_start <= now < dnd_end
+
+            if is_dnd:
+                print("Escalation: DND active. Skipping voice call.")
+                return
+
+            # Check Dynamic DND via Calendar
+            try:
+                # Check for active calendar events that might indicate busy status
+                events = await self.adapters["mcp"].call_tool(
                     "google-services",
                     "list_events",
-                    {"limit": 3},  # pragma: no cover
-                )  # pragma: no cover
-                if events and isinstance(events, list):  # pragma: no cover
-                    for event in events:  # pragma: no cover
-                        summary = str(
-                            event.get("summary", "")
-                        ).upper()  # pragma: no cover
-                        if any(  # pragma: no cover
-                            k in summary  # pragma: no cover
-                            for k in [  # pragma: no cover
-                                "BUSY",  # pragma: no cover
-                                "MEETING",  # pragma: no cover
-                                "DND",  # pragma: no cover
-                                "SLEEP",  # pragma: no cover
-                                "DO NOT DISTURB",  # pragma: no cover
-                            ]  # pragma: no cover
-                        ):  # pragma: no cover
-                            print(  # pragma: no cover
-                                f"Escalation: Dynamic DND active via Calendar ('{summary}'). Skipping call."  # pragma: no cover
+                    {"limit": 3},
+                )
+                if events and isinstance(events, list):
+                    for event in events:
+                        summary = str(event.get("summary", "")).upper()
+                        if any(
+                            k in summary
+                            for k in [
+                                "BUSY",
+                                "MEETING",
+                                "DND",
+                                "SLEEP",
+                                "DO NOT DISTURB",
+                            ]
+                        ):
+                            print(
+                                f"Escalation: Dynamic DND active via Calendar ('{summary}'). Skipping call."
                             )
                             return
             except Exception as e:
@@ -1091,7 +845,7 @@ class MegaBotOrchestrator:
                     content=f"🤔 I think you are '{claimed_name}'. Link this {platform} account to your unified history? Type `!approve {action['id']}`.",
                     sender="System",
                 )
-                asyncio.create_task(
+                _safe_create_task(
                     self.send_platform_message(resp, chat_id=chat_id, platform=platform)
                 )
 
@@ -1125,21 +879,17 @@ class MegaBotOrchestrator:
                     if content not in seen_content:
                         all_lessons.append(res)
                         seen_content.add(content)
-            # pragma: no cover
+
             if not all_lessons:
                 return ""
 
-            # 3. Distillation (if too many lessons)  # pragma: no cover
-            if len(all_lessons) > 3:  # pragma: no cover
-                lessons_text = "\n".join(
-                    [f"- {l['content']}" for l in all_lessons]
-                )  # pragma: no cover
-                distill_prompt = f"Summarize the following architectural lessons into a concise, high-priority list (max 3 points):\n\n{lessons_text}"  # pragma: no cover
-                distilled = await self.llm.generate(  # pragma: no cover
-                    context="Memory Distillation",  # pragma: no cover
-                    messages=[
-                        {"role": "user", "content": distill_prompt}
-                    ],  # pragma: no cover
+            # 3. Distillation (if too many lessons)
+            if len(all_lessons) > 3:
+                lessons_text = "\n".join([f"- {l['content']}" for l in all_lessons])
+                distill_prompt = f"Summarize the following architectural lessons into a concise, high-priority list (max 3 points):\n\n{lessons_text}"
+                distilled = await self.llm.generate(
+                    context="Memory Distillation",
+                    messages=[{"role": "user", "content": distill_prompt}],
                 )
                 return f"\n[DISTILLED LESSONS FROM MEMORY]:\n{distilled}\n"
 
@@ -1149,8 +899,8 @@ class MegaBotOrchestrator:
                 prefix = (
                     "⚠️ CRITICAL: " if "CRITICAL" in lesson["content"].upper() else "- "
                 )
-                formatted += f"{prefix}{lesson['content']}\n"  # pragma: no cover
-            return formatted  # pragma: no cover
+                formatted += f"{prefix}{lesson['content']}\n"
+            return formatted
         except Exception as e:  # pragma: no cover
             print(f"Lesson injection failed: {e}")
             return ""
@@ -1394,75 +1144,72 @@ class MegaBotOrchestrator:
         websocket: WebSocket,
         action_id: str,
         callback: Optional[Any] = None,
-    ):  # pragma: no cover
-        """Handle Anthropic Computer Use tool calls with Approval Interlock"""  # pragma: no cover
-        action_type = tool_input.get("action")  # pragma: no cover
-        description = f"Computer Use: {action_type} ({tool_input})"  # pragma: no cover
-        # pragma: no cover
-        # Queue for approval  # pragma: no cover
-        import uuid  # pragma: no cover
+    ):
+        """Handle Anthropic Computer Use tool calls with Approval Interlock"""
+        action_type = tool_input.get("action")
+        description = f"Computer Use: {action_type} ({tool_input})"
 
-        # pragma: no cover
-        action = {  # pragma: no cover
-            "id": action_id or str(uuid.uuid4()),  # pragma: no cover
-            "type": "computer_use",  # pragma: no cover
-            "payload": tool_input,  # pragma: no cover
-            "description": description,  # pragma: no cover
-            "websocket": websocket,  # pragma: no cover
-            "callback": callback,  # pragma: no cover
-        }  # pragma: no cover
-        self.admin_handler.approval_queue.append(action)  # pragma: no cover
-        # pragma: no cover
-        await websocket.send_json(  # pragma: no cover
-            {  # pragma: no cover
-                "type": "status",  # pragma: no cover
-                "content": f"Computer action queued for approval: {action_type}",  # pragma: no cover
-            }  # pragma: no cover
-        )  # pragma: no cover
-        # Broadcast update  # pragma: no cover
+        # Queue for approval
+        import uuid
+
+        action = {
+            "id": action_id or str(uuid.uuid4()),
+            "type": "computer_use",
+            "payload": tool_input,
+            "description": description,
+            "websocket": websocket,
+            "callback": callback,
+        }
+        self.admin_handler.approval_queue.append(action)
+
+        await websocket.send_json(
+            {
+                "type": "status",
+                "content": f"Computer action queued for approval: {action_type}",
+            }
+        )
+        # Broadcast update
         for client in list(self.clients):
             await client.send_json({"type": "approval_required", "action": action})
 
     async def _llm_dispatch(
         self, prompt: str, context: Any, tools: Optional[List[Dict[str, Any]]] = None
-    ) -> Any:  # pragma: no cover
+    ) -> Any:
         """Unified tool selection logic using configured LLM provider"""
         return await self.llm.generate(prompt, context, tools=tools)
 
-    def _check_policy(self, data: Dict) -> str:  # pragma: no cover
-        """Check if an action is pre-approved or pre-denied based on policies"""  # pragma: no cover
-        method = data.get("method")  # pragma: no cover
-        params = data.get("params", {})  # pragma: no cover
-        command = params.get("command", "")  # pragma: no cover
-        # pragma: no cover
-        # Determine scope  # pragma: no cover
-        scope = str(method) if method else "unknown"  # pragma: no cover
-        if method in ["system.run", "shell.execute"] and command:  # pragma: no cover
-            # 1. Try full command match (both with and without 'shell.' prefix)  # pragma: no cover
-            # This handles policies set as 'git status' or 'shell.git status'  # pragma: no cover
-            for s in [f"shell.{command}", command]:  # pragma: no cover
-                auth = self.permissions.is_authorized(s)  # pragma: no cover
-                if auth is not None:  # pragma: no cover
-                    return "allow" if auth else "deny"  # pragma: no cover
-            # pragma: no cover
-            # 2. Try granular scope (e.g., shell.git or just git)  # pragma: no cover
-            cmd_part = (
-                str(command).split()[0] if command else "unknown"
-            )  # pragma: no cover
-            for s in [f"shell.{cmd_part}", cmd_part]:  # pragma: no cover
-                auth = self.permissions.is_authorized(s)  # pragma: no cover
-                if auth is not None:  # pragma: no cover
-                    return "allow" if auth else "deny"  # pragma: no cover
-        # pragma: no cover
-        auth = self.permissions.is_authorized(scope)  # pragma: no cover
-        # pragma: no cover
-        if auth is True:  # pragma: no cover
-            return "allow"  # pragma: no cover
-        if auth is False:  # pragma: no cover
+    def _check_policy(self, data: Dict) -> str:
+        """Check if an action is pre-approved or pre-denied based on policies"""
+        method = data.get("method")
+        params = data.get("params", {})
+        command = params.get("command", "")
+
+        # Determine scope
+        scope = str(method) if method else "unknown"
+        if method in ["system.run", "shell.execute"] and command:
+            # 1. Try full command match (both with and without 'shell.' prefix)
+            # This handles policies set as 'git status' or 'shell.git status'
+            for s in [f"shell.{command}", command]:
+                auth = self.permissions.is_authorized(s)
+                if auth is not None:
+                    return "allow" if auth else "deny"
+
+            # 2. Try granular scope (e.g., shell.git or just git)
+            cmd_part = str(command).split()[0] if command else "unknown"
+            for s in [f"shell.{cmd_part}", cmd_part]:
+                auth = self.permissions.is_authorized(s)
+                if auth is not None:
+                    return "allow" if auth else "deny"
+
+        auth = self.permissions.is_authorized(scope)
+
+        if auth is True:
+            return "allow"
+        if auth is False:
             return "deny"
         return "ask"
 
-    async def on_openclaw_event(self, data):  # pragma: no cover
+    async def on_openclaw_event(self, data):
         print(f"OpenClaw Event: {data}")
         method = data.get("method")
         params = data.get("params", {})
@@ -1474,71 +1221,62 @@ class MegaBotOrchestrator:
             greeting = Message(content=GREETING_TEXT, sender="MegaBot")
             await self.adapters["openclaw"].send_message(greeting)
             return
-        # pragma: no cover
-        # Check for chat-based admin commands from OpenClaw (WhatsApp/Telegram)  # pragma: no cover
-        if method == "chat.message" and content.startswith("!"):  # pragma: no cover
-            chat_id = params.get("chat_id") or sender_id  # pragma: no cover
-            platform = params.get("platform", "openclaw")  # pragma: no cover
-            if await self._handle_admin_command(
-                content, sender_id, chat_id, platform
-            ):  # pragma: no cover
-                return  # Command handled  # pragma: no cover
-        # pragma: no cover
-        # INTERCEPT: Check policies for sensitive system commands  # pragma: no cover
-        if method == "system.run" or method == "shell.execute":  # pragma: no cover
-            policy = self._check_policy(data)  # pragma: no cover
-            # pragma: no cover
-            if policy == "allow":  # pragma: no cover
-                print(f"Policy: Auto-approving {method}")  # pragma: no cover
-                await self.adapters["openclaw"].send_message(data)  # pragma: no cover
-                return  # pragma: no cover
-            # pragma: no cover
-            if policy == "deny":  # pragma: no cover
-                print(f"Policy: Auto-denying {method}")  # pragma: no cover
-                return  # Discard  # pragma: no cover
-            # pragma: no cover
-            # Default: Queue for manual approval  # pragma: no cover
-            import uuid  # pragma: no cover
 
-            # pragma: no cover
-            action = {  # pragma: no cover
-                "id": str(uuid.uuid4()),  # pragma: no cover
-                "type": "system_command",  # pragma: no cover
-                "payload": data,  # pragma: no cover
-                "description": f"Execute: {data.get('params', {}).get('command')}",  # pragma: no cover
-            }  # pragma: no cover
-            self.admin_handler.approval_queue.append(action)  # pragma: no cover
-            # Notify UI of new pending action  # pragma: no cover
-            for client in list(self.clients):  # pragma: no cover
-                await client.send_json(
-                    {"type": "approval_required", "action": action}
-                )  # pragma: no cover
-            # pragma: no cover
-            # Notify messaging server (for Signal/Telegram admins)  # pragma: no cover
-            admin_resp = Message(  # pragma: no cover
-                content=f"⚠️ Approval Required: {action['description']}\nType `!approve {action['id']}` to authorize.",  # pragma: no cover
-                sender="Security",  # pragma: no cover
-            )  # pragma: no cover
-            asyncio.create_task(
-                self.send_platform_message(admin_resp)
-            )  # pragma: no cover
-            return  # pragma: no cover
-        # pragma: no cover
-        # Relay standard events to all connected UI clients  # pragma: no cover
-        for client in list(self.clients):  # pragma: no cover
-            try:  # pragma: no cover
-                await client.send_json(
-                    {"type": "openclaw_event", "payload": data}
-                )  # pragma: no cover
-            except Exception:  # pragma: no cover
-                self.clients.discard(client)  # pragma: no cover
-        # pragma: no cover
-        # Also relay to Native Messaging Server clients  # pragma: no cover
-        if data.get("method") == "chat.message":  # pragma: no cover
-            params = data.get("params", {})  # pragma: no cover
-            msg = Message(  # pragma: no cover
-                content=params.get("content", ""),  # pragma: no cover
-                sender=params.get("sender", "OpenClaw"),  # pragma: no cover
+        # Check for chat-based admin commands from OpenClaw (WhatsApp/Telegram)
+        if method == "chat.message" and content.startswith("!"):
+            chat_id = params.get("chat_id") or sender_id
+            platform = params.get("platform", "openclaw")
+            if await self._handle_admin_command(content, sender_id, chat_id, platform):
+                return  # Command handled
+
+        # INTERCEPT: Check policies for sensitive system commands
+        if method == "system.run" or method == "shell.execute":
+            policy = self._check_policy(data)
+
+            if policy == "allow":
+                print(f"Policy: Auto-approving {method}")
+                await self.adapters["openclaw"].send_message(data)
+                return
+
+            if policy == "deny":
+                print(f"Policy: Auto-denying {method}")
+                return  # Discard
+
+            # Default: Queue for manual approval
+            import uuid
+
+            action = {
+                "id": str(uuid.uuid4()),
+                "type": "system_command",
+                "payload": data,
+                "description": f"Execute: {data.get('params', {}).get('command')}",
+            }
+            self.admin_handler.approval_queue.append(action)
+            # Notify UI of new pending action
+            for client in list(self.clients):
+                await client.send_json({"type": "approval_required", "action": action})
+
+            # Notify messaging server (for Signal/Telegram admins)
+            admin_resp = Message(
+                content=f"⚠️ Approval Required: {action['description']}\nType `!approve {action['id']}` to authorize.",
+                sender="Security",
+            )
+            _safe_create_task(self.send_platform_message(admin_resp))
+            return
+
+        # Relay standard events to all connected UI clients
+        for client in list(self.clients):
+            try:
+                await client.send_json({"type": "openclaw_event", "payload": data})
+            except Exception:
+                self.clients.discard(client)
+
+        # Also relay to Native Messaging Server clients
+        if data.get("method") == "chat.message":
+            params = data.get("params", {})
+            msg = Message(
+                content=params.get("content", ""),
+                sender=params.get("sender", "OpenClaw"),
             )
             await self.send_platform_message(msg)
 
@@ -1553,227 +1291,194 @@ class MegaBotOrchestrator:
         # Remove other control characters except newline and tab
         sanitized = "".join(ch for ch in sanitized if ch >= " " or ch in "\n\r\t")
 
-        return sanitized  # pragma: no cover
+        return sanitized
 
-    # pragma: no cover
-    async def _process_approval(
-        self, action_id: str, approved: bool
-    ):  # pragma: no cover
-        """Execute or discard a pending sensitive action"""  # pragma: no cover
-        action = next(  # pragma: no cover
+    async def _process_approval(self, action_id: str, approved: bool):
+        """Execute or discard a pending sensitive action"""
+        action = next(
             (a for a in self.admin_handler.approval_queue if a["id"] == action_id),
-            None,  # pragma: no cover
-        )  # pragma: no cover
-        if not action:  # pragma: no cover
-            return  # pragma: no cover
-        # pragma: no cover
-        if approved:  # pragma: no cover
-            print(f"Action Approved: {action['type']}")  # pragma: no cover
-            if action["type"] == "system_command":  # pragma: no cover
-                # ... existing system_command logic ...  # pragma: no cover
-                params = action.get("payload", {}).get("params", {})  # pragma: no cover
-                cmd = (
-                    params.get("command") if isinstance(params, dict) else None
-                )  # pragma: no cover
-                if cmd:  # pragma: no cover
-                    # Inject secrets before execution  # pragma: no cover
-                    cmd = self.secret_manager.inject_secrets(cmd)  # pragma: no cover
-                    # pragma: no cover
-                    # Execute and capture output  # pragma: no cover
-                    import subprocess  # pragma: no cover
+            None,
+        )
+        if not action:
+            return
 
-                    # pragma: no cover
-                    try:  # pragma: no cover
-                        # Tirith Guard validation before execution  # pragma: no cover
-                        if not tirith.validate(cmd):  # pragma: no cover
-                            output = "Security Error: Command blocked by Tirith Guard (Suspicious Unicode/Cyrillic detected)."  # pragma: no cover
-                        else:  # pragma: no cover
-                            result = subprocess.run(  # pragma: no cover
-                                cmd,  # pragma: no cover
-                                shell=True,  # pragma: no cover
-                                capture_output=True,  # pragma: no cover
-                                text=True,  # pragma: no cover
-                                timeout=30,  # pragma: no cover
-                            )  # pragma: no cover
-                            output = tirith.sanitize(
-                                result.stdout + result.stderr
-                            )  # pragma: no cover
-                        # pragma: no cover
-                        # Scrub secrets from output  # pragma: no cover
-                        output = self.secret_manager.scrub_secrets(
-                            output
-                        )  # pragma: no cover
-                    except Exception as e:  # pragma: no cover
-                        output = f"Command failed: {e}"  # pragma: no cover
-                    # pragma: no cover
-                    # Send back to the specific websocket that requested it  # pragma: no cover
-                    ws = action.get("websocket")  # pragma: no cover
-                    if ws:  # pragma: no cover
-                        await ws.send_json(  # pragma: no cover
+        if approved:
+            print(f"Action Approved: {action['type']}")
+            if action["type"] == "system_command":
+                # ... existing system_command logic ...
+                params = action.get("payload", {}).get("params", {})
+                cmd = params.get("command") if isinstance(params, dict) else None
+                if cmd:
+                    # Inject secrets before execution
+                    cmd = self.secret_manager.inject_secrets(cmd)
+
+                    # Execute and capture output
+                    import subprocess
+
+                    try:
+                        # Tirith Guard validation before execution
+                        if not tirith.validate(cmd):
+                            output = "Security Error: Command blocked by Tirith Guard (Suspicious Unicode/Cyrillic detected)."
+                        else:
+                            result = subprocess.run(
+                                cmd,
+                                shell=True,
+                                capture_output=True,
+                                text=True,
+                                timeout=30,
+                            )
+                            output = tirith.sanitize(result.stdout + result.stderr)
+
+                        # Scrub secrets from output
+                        output = self.secret_manager.scrub_secrets(output)
+                    except Exception as e:
+                        output = f"Command failed: {e}"
+
+                    # Send back to the specific websocket that requested it
+                    ws = action.get("websocket")
+                    if ws:
+                        await ws.send_json(
                             {
                                 "type": "terminal_output",
                                 "content": output,
-                            }  # pragma: no cover
-                        )  # pragma: no cover
-                    # pragma: no cover
-                    # Also relay to OpenClaw if needed  # pragma: no cover
-                    await self.adapters["openclaw"].send_message(  # pragma: no cover
+                            }
+                        )
+
+                    # Also relay to OpenClaw if needed
+                    await self.adapters["openclaw"].send_message(
                         {
                             "method": "system.result",
                             "params": {"output": output},
-                        }  # pragma: no cover
-                    )  # pragma: no cover
-            # pragma: no cover
-            elif action["type"] == "outbound_vision":  # pragma: no cover
-                payload = action.get("payload", {})  # pragma: no cover
-                # Reconstruct and send the message now that it's approved  # pragma: no cover
-                approved_msg = Message(  # pragma: no cover
-                    content=payload.get("message_content", ""),  # pragma: no cover
-                    sender="MegaBot",  # pragma: no cover
-                    attachments=payload.get("attachments", []),  # pragma: no cover
-                )  # pragma: no cover
-                # Call send_platform_message again, but bypass vision check if possible or rely on policy change  # pragma: no cover
-                # To avoid re-queuing, we can temporarily set policy or use a flag.  # pragma: no cover
-                # Simplest: call the messaging adapter directly for this approved action.  # pragma: no cover
-                platform_msg = self._to_platform_message(  # pragma: no cover
+                        }
+                    )
+
+            elif action["type"] == "outbound_vision":
+                payload = action.get("payload", {})
+                # Reconstruct and send the message now that it's approved
+                approved_msg = Message(
+                    content=payload.get("message_content", ""),
+                    sender="MegaBot",
+                    attachments=payload.get("attachments", []),
+                )
+                # Call send_platform_message again, but bypass vision check if possible or rely on policy change
+                # To avoid re-queuing, we can temporarily set policy or use a flag.
+                # Simplest: call the messaging adapter directly for this approved action.
+                platform_msg = self._to_platform_message(
                     approved_msg,
-                    chat_id=payload.get("chat_id"),  # pragma: no cover
-                )  # pragma: no cover
-                platform_msg.platform = payload.get(
-                    "platform", "native"
-                )  # pragma: no cover
-                await self.adapters["messaging"].send_message(  # pragma: no cover
+                    chat_id=payload.get("chat_id"),
+                )
+                platform_msg.platform = payload.get("platform", "native")
+                await self.adapters["messaging"].send_message(
                     platform_msg,
-                    target_client=payload.get("target_client"),  # pragma: no cover
-                )  # pragma: no cover
-                print(
-                    f"Outbound vision approved and sent to {payload.get('chat_id')}"
-                )  # pragma: no cover
-            # pragma: no cover
-            elif action["type"] == "data_execution":  # pragma: no cover
-                payload = action.get("payload", {})  # pragma: no cover
-                name = payload.get("name")  # pragma: no cover
-                code = payload.get("code")  # pragma: no cover
-                # pragma: no cover
-                # We need access to the data agent.  # pragma: no cover
-                # This assumes we have a way to get it, usually it's a feature we discovery  # pragma: no cover
-                # For now, let's assume we can find it in discovery or it's a known global  # pragma: no cover
-                try:  # pragma: no cover
-                    # Generic way to find the data agent if it was registered  # pragma: no cover
-                    # In a real app, this might be self.features["dash_data"]  # pragma: no cover
+                    target_client=payload.get("target_client"),
+                )
+                print(f"Outbound vision approved and sent to {payload.get('chat_id')}")
+
+            elif action["type"] == "data_execution":
+                payload = action.get("payload", {})
+                name = payload.get("name")
+                code = payload.get("code")
+
+                # We need access to the data agent.
+                # This assumes we have a way to get it, usually it's a feature we discovery
+                # For now, let's assume we can find it in discovery or it's a known global
+                try:
+                    # Generic way to find the data agent if it was registered
+                    # In a real app, this might be self.features["dash_data"]
                     from features.dash_data.agent import (
                         DashDataAgent,
-                    )  # pragma: no cover
+                    )
 
-                    # pragma: no cover
-                    temp_agent = DashDataAgent(self.llm, self)  # pragma: no cover
-                    # We'd need to restore the datasets, but for this prototype,  # pragma: no cover
-                    # we'll assume the agent that queued it is still alive or we recreate context  # pragma: no cover
-                    output = await temp_agent.execute_python_analysis(
-                        name, code
-                    )  # pragma: no cover
-                except Exception as e:  # pragma: no cover
-                    output = f"Approval execution failed: {e}"  # pragma: no cover
-                # pragma: no cover
-                # Send back results to admins  # pragma: no cover
-                resp = Message(  # pragma: no cover
+                    temp_agent = DashDataAgent(self.llm, self)
+                    # We'd need to restore the datasets, but for this prototype,
+                    # we'll assume the agent that queued it is still alive or we recreate context
+                    output = await temp_agent.execute_python_analysis(name, code)
+                except Exception as e:
+                    output = f"Approval execution failed: {e}"
+
+                # Send back results to admins
+                resp = Message(
                     content=f"✅ Data Execution Result:\n{output}",
-                    sender="DataAgent",  # pragma: no cover
-                )  # pragma: no cover
-                await self.send_platform_message(resp)  # pragma: no cover
-            # pragma: no cover
-            elif action["type"] == "computer_use":  # pragma: no cover
-                payload = action.get("payload", {})  # pragma: no cover
-                # pragma: no cover
-                # Execute actual computer action  # pragma: no cover
-                action_type = payload.get("action")  # pragma: no cover
-                coordinate = payload.get("coordinate")  # pragma: no cover
-                text = payload.get("text")  # pragma: no cover
-                # pragma: no cover
-                output = await self.computer_driver.execute(  # pragma: no cover
+                    sender="DataAgent",
+                )
+                await self.send_platform_message(resp)
+
+            elif action["type"] == "computer_use":
+                payload = action.get("payload", {})
+
+                # Execute actual computer action
+                action_type = payload.get("action")
+                coordinate = payload.get("coordinate")
+                text = payload.get("text")
+
+                output = await self.computer_driver.execute(
                     action_type,
                     coordinate,
-                    text,  # pragma: no cover
-                )  # pragma: no cover
-                print(f"Computer Action Result: {output}")  # pragma: no cover
-                # pragma: no cover
-                ws = action.get("websocket")  # pragma: no cover
-                if ws:  # pragma: no cover
-                    # If it's a screenshot, send it as a special type  # pragma: no cover
-                    if action_type == "screenshot" and not output.startswith(
-                        "Error"
-                    ):  # pragma: no cover
-                        await ws.send_json(
-                            {"type": "screenshot", "content": output}
-                        )  # pragma: no cover
-                        output = (
-                            "Screenshot captured and sent to UI."  # pragma: no cover
-                        )
-                    else:  # pragma: no cover
-                        await ws.send_json(
-                            {"type": "status", "content": output}
-                        )  # pragma: no cover
-                # pragma: no cover
-                # Report back to OpenClaw/LLM  # pragma: no cover
-                # We also include the action id so the LLM knows which call this corresponds to  # pragma: no cover
-                await self.adapters["openclaw"].send_message(  # pragma: no cover
-                    {  # pragma: no cover
-                        "method": "tool.result",  # pragma: no cover
+                    text,
+                )
+                print(f"Computer Action Result: {output}")
+
+                ws = action.get("websocket")
+                if ws:
+                    # If it's a screenshot, send it as a special type
+                    if action_type == "screenshot" and not output.startswith("Error"):
+                        await ws.send_json({"type": "screenshot", "content": output})
+                        output = "Screenshot captured and sent to UI."
+                    else:
+                        await ws.send_json({"type": "status", "content": output})
+
+                # Report back to OpenClaw/LLM
+                # We also include the action id so the LLM knows which call this corresponds to
+                await self.adapters["openclaw"].send_message(
+                    {
+                        "method": "tool.result",
                         "params": {
                             "id": action["id"],
                             "output": output,
-                        },  # pragma: no cover
-                    }  # pragma: no cover
-                )  # pragma: no cover
-                # pragma: no cover
-                # If we have a resume callback, trigger it  # pragma: no cover
-                if "callback" in action and callable(
-                    action["callback"]
-                ):  # pragma: no cover
-                    await action["callback"](output)  # pragma: no cover
-            # pragma: no cover
-            elif action["type"] == "identity_link":  # pragma: no cover
-                payload = action.get("payload", {})  # pragma: no cover
-                internal_id = payload.get("internal_id")  # pragma: no cover
-                platform = payload.get("platform")  # pragma: no cover
-                platform_id = payload.get("platform_id")  # pragma: no cover
-                chat_id = payload.get("chat_id")  # pragma: no cover
-                # pragma: no cover
-                if internal_id and platform and platform_id:  # pragma: no cover
-                    await self.memory.link_identity(
-                        internal_id, platform, platform_id
-                    )  # pragma: no cover
-                    resp = Message(  # pragma: no cover
-                        content=f"✅ Identity Link Verified: '{internal_id}' linked to {platform}:{platform_id}",  # pragma: no cover
-                        sender="System",  # pragma: no cover
-                    )  # pragma: no cover
-                    await self.send_platform_message(  # pragma: no cover
+                        },
+                    }
+                )
+
+                # If we have a resume callback, trigger it
+                if "callback" in action and callable(action["callback"]):
+                    await action["callback"](output)
+
+            elif action["type"] == "identity_link":
+                payload = action.get("payload", {})
+                internal_id = payload.get("internal_id")
+                platform = payload.get("platform")
+                platform_id = payload.get("platform_id")
+                chat_id = payload.get("chat_id")
+
+                if internal_id and platform and platform_id:
+                    await self.memory.link_identity(internal_id, platform, platform_id)
+                    resp = Message(
+                        content=f"✅ Identity Link Verified: '{internal_id}' linked to {platform}:{platform_id}",
+                        sender="System",
+                    )
+                    await self.send_platform_message(
                         resp,
                         chat_id=chat_id,
-                        platform=platform,  # pragma: no cover
-                    )  # pragma: no cover
-        else:  # pragma: no cover
-            print(f"Action Denied: {action['type']}")  # pragma: no cover
-            # Notify the callback of failure/denial  # pragma: no cover
-            if "callback" in action and callable(
-                action["callback"]
-            ):  # pragma: no cover
-                await action["callback"]("Action denied by user.")  # pragma: no cover
-        # pragma: no cover
-        self.admin_handler.approval_queue = [  # pragma: no cover
-            a
-            for a in self.admin_handler.approval_queue
-            if a["id"] != action_id  # pragma: no cover
-        ]  # pragma: no cover
-        # pragma: no cover
-        # Broadcast queue update to all clients  # pragma: no cover
-        for client in list(self.clients):  # pragma: no cover
-            try:  # pragma: no cover
-                await client.send_json(  # pragma: no cover
-                    {  # pragma: no cover
-                        "type": "approval_queue_updated",  # pragma: no cover
-                        "queue": self.admin_handler.approval_queue,  # pragma: no cover
-                    }  # pragma: no cover
+                        platform=platform,
+                    )
+        else:
+            print(f"Action Denied: {action['type']}")
+            # Notify the callback of failure/denial
+            if "callback" in action and callable(action["callback"]):
+                await action["callback"]("Action denied by user.")
+
+        self.admin_handler.approval_queue = [
+            a for a in self.admin_handler.approval_queue if a["id"] != action_id
+        ]
+
+        # Broadcast queue update to all clients
+        for client in list(self.clients):
+            try:
+                await client.send_json(
+                    {
+                        "type": "approval_queue_updated",
+                        "queue": self.admin_handler.approval_queue,
+                    }
                 )
             except Exception as e:
                 print(f"Failed to notify client of queue update: {e}")
@@ -1805,7 +1510,7 @@ class MegaBotOrchestrator:
         )
 
         try:
-            while True:  # pragma: no cover  # pragma: no cover
+            while True:  # pragma: no cover
                 data = await websocket.receive_text()
                 msg_data = json.loads(data)
                 print(f"Received from UI: {msg_data}")
@@ -1820,9 +1525,7 @@ class MegaBotOrchestrator:
 
                     # If in 'build' mode, attempt autonomous planning/execution
                     if self.mode == "build":
-                        asyncio.create_task(
-                            self.run_autonomous_build(message, websocket)
-                        )
+                        _safe_create_task(self.run_autonomous_build(message, websocket))
                     else:
                         # Standard relay to OpenClaw
                         await self.adapters["openclaw"].send_message(message)

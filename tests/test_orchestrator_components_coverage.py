@@ -41,10 +41,10 @@ async def test_message_handler_full(mock_orchestrator):
     # _process_attachments
     mock_driver = AsyncMock()
     mock_driver.execute.return_value = "cat"
-    from core.dependencies import register_service
-    from core.drivers import ComputerDriver
 
-    register_service(ComputerDriver, mock_driver)
+    # Reset the cached driver so our mock is used instead of the
+    # real ComputerDriver resolved during process_gateway_message above
+    handler._computer_driver = mock_driver
 
     res = await handler._process_attachments(
         [{"type": "image", "data": "d"}], "s1", "c"

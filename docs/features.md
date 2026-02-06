@@ -35,3 +35,57 @@ A premium React-based interface providing:
 - **Memory Hub**: Visualize categories and browse recent memory items.
 - **Integrated Terminal**: Low-latency command execution.
 - **Mode Toggle**: Instant switching between operation profiles.
+
+### Tech Stack
+
+| Technology | Version | Role |
+|------------|---------|------|
+| Vite | 7.2 | Build tool & dev server |
+| React | 19.2 | Component framework |
+| Tailwind CSS | 4.1 | Utility-first styling |
+| TypeScript | 5.9 | Type safety |
+| Vitest | 4.0 | Unit & component testing |
+| React Testing Library | — | DOM interaction tests |
+
+---
+
+## 6. Feature Modules
+
+The `features/` directory houses specialized capabilities and integrated project documentation.
+
+```
+features/
+├── dash_data/
+│   ├── __init__.py
+│   └── agent.py          # DashDataAgent — CSV/JSON analysis with sandboxed Python
+├── DASH_README.md
+├── TIRITH_README.md
+├── MEMU_README.md
+├── OPENCLAW_README.md
+├── NANOBOT_README.md
+├── PAGE_INDEX_README.md
+├── AGENT_LIGHTNING_README.md
+└── AGENT_ZERO_README.md
+```
+
+### DashDataAgent
+`features/dash_data/agent.py` provides a sandboxed Python execution environment for deep data analysis on CSV and JSON datasets. It is invoked by the orchestrator when the user requests analytical operations.
+
+### Integrated Project Documentation
+
+| File | Project | Role |
+|------|---------|------|
+| `DASH_README.md` | Dashboard UI | Frontend architecture & setup |
+| `TIRITH_README.md` | TirithGuard | Security & command sanitization |
+| `MEMU_README.md` | memU | Hierarchical memory system |
+| `OPENCLAW_README.md` | OpenClaw | Messaging relay & execution |
+| `NANOBOT_README.md` | NanoBot | Lightweight agent framework |
+| `PAGE_INDEX_README.md` | PageIndex | RAG-based codebase navigation |
+| `AGENT_LIGHTNING_README.md` | Agent Lightning | Fast-response agent |
+| `AGENT_ZERO_README.md` | Agent Zero | Base agent framework |
+
+### Adding a New Feature Module
+1. Create a directory under `features/` (e.g., `features/my_module/`).
+2. Add an `__init__.py` and your main module file.
+3. If integrating an external project, add a `MY_MODULE_README.md` at the `features/` root.
+4. Register the module in the orchestrator's feature loader.

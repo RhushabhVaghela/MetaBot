@@ -8,7 +8,7 @@ MegaBot is built with a strong focus on reliability, maintaining high test cover
 - **Discovery Engine**: 100%
 - **Interfaces**: 100%
 - **Security (TirithGuard)**: 97%
-- **Adapter Modules**: 100% (all major adapters at 100% coverage, including SMS and iMessage)
+- **Adapter Modules**: 80–100% (individual adapter coverage ranges from 80% to 100%)
 - **Overall Core + Adapters**: 88% (including all latest tests)
 
 ### 📊 Current Coverage Details
@@ -41,8 +41,8 @@ MegaBot is built with a strong focus on reliability, maintaining high test cover
 - **Messaging Server**: 83% (239 statements, 40 missed - websockets edge cases)
 
 ### 📊 Coverage Improvement Progress
-**Completed (100% coverage achieved):**
-- ✅ All adapter modules (10/10 completed)
+**Completed (high coverage achieved):**
+- ✅ All adapter modules (12/12 completed — ranging from 80% to 100%)
 - ✅ Core orchestrator (99% - acceptable exclusions)
 
 **In Progress:**
@@ -69,7 +69,7 @@ Tests are located in `tests/` and use `pytest` with `pytest-cov`.
 # Set PYTHONPATH to include the project root
 export PYTHONPATH=$PYTHONPATH:.
 
-# Run all adapter tests (100% coverage achieved)
+# Run all adapter tests (80–100% coverage)
 PYTHONPATH=. pytest tests/test_*_adapter.py --cov=adapters --cov-report=term-missing
 
 # Run orchestrator tests (99% coverage)
@@ -120,10 +120,11 @@ All integration tests currently pass and verify end-to-end functionality.
 ## 📈 Recent Testing Improvements
 
 ### Adapter Coverage Completion (2024)
-- **Achievement**: All 10 adapter modules now at 100% coverage
+- **Achievement**: All 12 adapter modules at high coverage (80–100%)
 - **Methods**: Systematic testing with AsyncMock, error handling, and edge cases
-- **Coverage**: voice_adapter.py, memu_adapter.py, openclaw_adapter.py, mcp_adapter.py (100%)
-- **Near-complete**: discord_adapter.py (96%), slack_adapter.py (98%), telegram_adapter.py (98%)
+- **100%**: signal_adapter.py, telegram_adapter.py, sms.py, imessage.py
+- **95–99%**: discord_adapter.py (99%), slack_adapter.py (99%), push_notification_adapter.py (98%), openclaw_adapter.py, nanobot_adapter.py (95%)
+- **80–84%**: voice_adapter.py, memu_adapter.py, mcp_adapter.py (84%)
 
 ### Orchestrator Coverage Enhancement
 - **Before**: 97% coverage (10 lines missing)
@@ -198,14 +199,14 @@ Linting & static checks (CI)
 ## 🎯 Remaining Coverage Goals
 
 ### High Priority (Environment Blocked)
-- **Messaging Server** (52% → 100%): Requires dedicated conda environment
+- **Messaging Server** (83% — target 95%+): Requires dedicated conda environment
   - Encryption/decryption methods
   - Platform adapter initialization
   - Media handling and storage
   - Message routing and handlers
 
-### Medium Priority (Complex Testing Required)
-- **Network Gateway** (15% → 95%): Complex async WebSocket and tunnel management - NEAR COMPLETE
+### Medium Priority (Near Complete)
+- **Network Gateway** (95% achieved): Complex async WebSocket and tunnel management — NEAR COMPLETE
   - Connection type handling (local, Cloudflare, VPN) ✅
   - Health monitoring loops ✅
   - Rate limiting implementation ✅

@@ -1,0 +1,39 @@
+# docker-compose.override.yaml
+# ─────────────────────────────────────────────
+# Development overrides — automatically merged by `docker compose up`.
+# This file adds dev-specific volumes, ports, and environment settings.
+# ─────────────────────────────────────────────
+
+services:
+  megabot:
+    # Mount source code for live-reload during development
+    volumes:
+      - .:/app:cached
+      - megabot_data:/app/data
+      - megabot_media:/app/media
+      - megabot_logs:/app/logs
+      # Mount external repos for local development
+      - "${MEMU_REPO_PATH:-./external/memU}:/app/external_repos/memU"
+      - "${OPENCLAW_REPO_PATH:-./external/openclaw}:/app/external_repos/openclaw"
+    environment:
+      # Extended Python path for local dev repos
+      PYTHONPATH: /app:/app/external_repos/memU/src:/app/external_repos/openclaw
+      # memU dev config
+      MEMU_OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:14b}
+      MEMU_PROACTIVE_MODE: "${MEMU_PROACTIVE_MODE:-true}"
+      # Dev convenience
+      MEGABOT_CONFIG_PATH: /app/mega-config.yaml
+    ports:
+      - "8000:8000"
+      - "18790:18790"
+      - "5173:5173"    # Web UI dev server
+
+  ollama:
+    # In development, expose all GPUs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

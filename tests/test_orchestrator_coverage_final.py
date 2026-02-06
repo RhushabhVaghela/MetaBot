@@ -82,15 +82,19 @@ async def test_orchestrator_spawn_sub_agent(orchestrator):
 async def test_orchestrator_admin_commands(orchestrator):
     orchestrator.config.admins = ["admin1"]
     orchestrator.admin_handler.approval_queue = [{"id": "act1"}]
-    orchestrator._process_approval = AsyncMock()
+    orchestrator.admin_handler._process_approval = AsyncMock()
 
     # !approve
     await orchestrator._handle_admin_command("!approve act1", "admin1")
-    orchestrator._process_approval.assert_called_with("act1", approved=True)
+    orchestrator.admin_handler._process_approval.assert_called_with(
+        "act1", approved=True
+    )
 
     # !reject
     await orchestrator._handle_admin_command("!reject act1", "admin1")
-    orchestrator._process_approval.assert_called_with("act1", approved=False)
+    orchestrator.admin_handler._process_approval.assert_called_with(
+        "act1", approved=False
+    )
 
     # !allow
     orchestrator.config.policies = {}

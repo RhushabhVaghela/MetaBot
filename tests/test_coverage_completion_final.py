@@ -175,25 +175,27 @@ class TestAdminHandlerCoverage:
         handler = AdminHandler(orchestrator)
         test_file = tmp_path / "test.txt"
 
-        # Write
-        action_write = {
-            "type": "file_operation",
-            "payload": {
-                "operation": "write",
-                "path": str(test_file),
-                "content": "hello",
-            },
-        }
-        await handler._execute_approved_action(action_write)
-        assert test_file.read_text() == "hello"
+        # Patch PROJECT_ROOT so tmp_path is considered within the allowed tree
+        with patch.object(AdminHandler, "PROJECT_ROOT", tmp_path):
+            # Write
+            action_write = {
+                "type": "file_operation",
+                "payload": {
+                    "operation": "write",
+                    "path": str(test_file),
+                    "content": "hello",
+                },
+            }
+            await handler._execute_approved_action(action_write)
+            assert test_file.read_text() == "hello"
 
-        # Read
-        action_read = {
-            "type": "file_operation",
-            "payload": {"operation": "read", "path": str(test_file)},
-        }
-        res = await handler._execute_approved_action(action_read)
-        assert res == "hello"
+            # Read
+            action_read = {
+                "type": "file_operation",
+                "payload": {"operation": "read", "path": str(test_file)},
+            }
+            res = await handler._execute_approved_action(action_read)
+            assert res == "hello"
 
     @pytest.mark.asyncio
     async def test_execute_approved_action_openclaw(self, orchestrator):

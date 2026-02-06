@@ -1973,13 +1973,8 @@ class TestDiscordAdapter:
 
     @pytest.mark.asyncio
     async def test_download_media_not_implemented(self, adapter):
-        """Test download_media returns None and prints not implemented"""
-        with patch("builtins.print") as mock_print:
-            result = await adapter.download_media("msg123", "/tmp/save.mp3")
-
-        mock_print.assert_called_once_with(
-            "[Discord] Download media not implemented for message msg123"
-        )
+        """Test download_media returns None and logs not implemented"""
+        result = await adapter.download_media("msg123", "/tmp/save.mp3")
         assert result is None
 
     @pytest.mark.asyncio

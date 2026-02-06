@@ -1,9 +1,9 @@
-import sqlite3
 import json
 import os
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 from .chat_memory import ChatMemoryManager
 from .user_identity import UserIdentityManager
@@ -26,24 +26,20 @@ class MemoryServer:
             db_path = os.path.join(os.getcwd(), "megabot_memory.db")
         self.db_path = db_path
 
-        # Initialize modular managers
-        self.chat_memory = ChatMemoryManager(db_path)
+        # Shared executor for all memory managers to avoid over-subscribing threads
+        self._shared_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="mem-db"
+        )
+
+        # Initialize modular managers with shared executor
+        self.chat_memory = ChatMemoryManager(db_path, executor=self._shared_executor)
         self.user_identity = UserIdentityManager(db_path)
-        self.knowledge_memory = KnowledgeMemoryManager(db_path)
+        self.knowledge_memory = KnowledgeMemoryManager(
+            db_path, executor=self._shared_executor
+        )
         self.backup_manager = MemoryBackupManager(db_path)
 
-        # Legacy compatibility - keep the old init for any existing code
-        self._init_legacy_db()
-
-    def _init_legacy_db(self):
-        """Legacy database initialization for backward compatibility."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                # Ensure all tables exist (managers handle their own tables)
-                pass
-            logger.info(f"Memory database initialized at {self.db_path}")
-        except Exception as e:
-            logger.error(f"Failed to initialize memory database: {e}")
+        logger.info(f"Memory database initialized at {self.db_path}")
 
     # Chat History Methods (delegated to ChatMemoryManager)
     async def chat_write(

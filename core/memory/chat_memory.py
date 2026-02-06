@@ -13,9 +13,11 @@ logger = logging.getLogger("megabot.memory.chat")
 class ChatMemoryManager:
     """Manages chat history operations with optimized queries and indexing."""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, executor=None):
         self.db_path = db_path
-        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="db")
+        self._executor = executor or ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="db"
+        )
         self._local = threading.local()  # Thread-local storage for connections
         self._init_tables()
 

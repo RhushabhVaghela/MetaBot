@@ -19,6 +19,7 @@ dependencies = [
 packages = ["core", "adapters", "modules"]
 
 [tool.pytest.ini_options]
+python_files = ["test_*.py", "*_test.py", "benchmark*.py", "benchmarks.py"]
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore:websockets.legacy is deprecated:DeprecationWarning",
