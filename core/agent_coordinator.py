@@ -1,19 +1,32 @@
 import re
 import json
+import os
+import tempfile
 from datetime import datetime
 from typing import Dict, Any
+from pathlib import Path
 
 from core.agents import SubAgent
 
 
 class AgentCoordinator:
-    """Manage sub-agent lifecycle and tool execution on their behalf."""
+    """Manage sub-agent lifecycle and tool execution on their behalf.
+
+    Security-focused changes:
+    - Do not register a sub-agent in orchestrator.sub_agents until after
+      pre-flight validation passes (avoid race where unvalidated agents
+      can be referenced).
+    - Require explicit `True` from permissions.is_authorized to allow a tool.
+    - Enforce workspace confinement for file reads/writes and perform atomic
+      writes via a temp file + replace.
+    """
+
+    READ_LIMIT = 1 * 1024 * 1024  # 1MB default read limit
 
     def __init__(self, orchestrator):
         self.orchestrator = orchestrator
-        # Do not store a separate sub_agents mapping here. Always read and
-        # write to orchestrator.sub_agents so external tests and callers that
-        # reassign `orchestrator.sub_agents` keep working.
+        # Always operate against orchestrator.sub_agents so external tests and
+        # callsites that reassign the mapping continue to work.
 
     async def _spawn_sub_agent(self, tool_input: Dict) -> str:
         """Spawn and orchestrate a sub-agent with Pre-flight Checks and Synthesis"""
@@ -21,10 +34,10 @@ class AgentCoordinator:
         task = str(tool_input.get("task", "unknown"))
         role = str(tool_input.get("role", "Assistant"))
 
+        # Create the agent but DO NOT register it globally until validation
+        # succeeds. This prevents callers from invoking tools on an
+        # unvalidated agent during the pre-flight phase.
         agent = SubAgent(name, role, task, self.orchestrator)
-        # Ensure orchestrator.sub_agents is updated so callers that inspect
-        # orchestrator.sub_agents see the new agent.
-        self.orchestrator.sub_agents[name] = agent
 
         # 1. Pre-flight Check: Planning & Validation
         print(f"Sub-Agent {name}: Generating plan...")
@@ -37,7 +50,20 @@ class AgentCoordinator:
             messages=[{"role": "user", "content": validation_prompt}],
         )
         if "VALID" not in str(validation_res).upper():
+            # Ensure the agent is NOT registered if validation fails
+            if name in self.orchestrator.sub_agents:
+                try:
+                    del self.orchestrator.sub_agents[name]
+                except Exception:
+                    pass
             return f"Sub-agent {name} blocked by pre-flight check: {validation_res}"
+
+        # Register the validated agent as active
+        try:
+            agent._active = True
+            self.orchestrator.sub_agents[name] = agent
+        except Exception:
+            pass
 
         # 2. Execution
         print(f"Sub-Agent {name}: Execution started...")
@@ -46,19 +72,19 @@ class AgentCoordinator:
         # 3. Synthesis: Refine and integrate sub-agent findings
         print(f"Sub-Agent {name}: Execution finished. Synthesizing results...")
         synthesis_prompt = f"""
-Integrate and summarize the findings from sub-agent '{name}' for the task '{task}'.
-Raw Result: {raw_result}
-
-Your goal is to extract architectural patterns or hard-won lessons that should be remembered by the Master Agent for future tasks.
-
-Format your response as a valid JSON object:
-{{
-    "summary": "Brief overall summary for immediate use",
-    "findings": ["Specific technical detail 1", "Specific technical detail 2"],
-    "learned_lesson": "A high-priority architectural decision, constraint, or pattern (e.g. 'Always use X when doing Y because of Z'). Prefix with 'CRITICAL:' if it relates to security or failure.",
-    "next_steps": ["Step 1"]
-}}
-"""
+ Integrate and summarize the findings from sub-agent '{name}' for the task '{task}'.
+ Raw Result: {raw_result}
+ 
+ Your goal is to extract architectural patterns or hard-won lessons that should be remembered by the Master Agent for future tasks.
+ 
+ Format your response as a valid JSON object:
+ {{
+     "summary": "Brief overall summary for immediate use",
+     "findings": ["Specific technical detail 1", "Specific technical detail 2"],
+     "learned_lesson": "A high-priority architectural decision, constraint, or pattern (e.g. 'Always use X when doing Y because of Z'). Prefix with 'CRITICAL:' if it relates to security or failure.",
+     "next_steps": ["Step 1"]
+ }}
+ """
         synthesis_raw = await self.orchestrator.llm.generate(
             context="Result Synthesis",
             messages=[{"role": "user", "content": synthesis_prompt}],
@@ -116,8 +142,12 @@ Format your response as a valid JSON object:
         if not agent:
             return "Error: Agent not found."
 
+        # Enforce that the agent has been activated (validated)
+        if not getattr(agent, "_active", False):
+            return f"Error: Agent '{agent_name}' is not active or validated."
+
         tool_name = str(tool_call.get("name", "unknown"))
-        tool_input = tool_call.get("input", {})
+        tool_input = tool_call.get("input", {}) or {}
 
         # Enforce Domain Boundaries
         allowed_tools = agent._get_sub_tools()
@@ -127,23 +157,79 @@ Format your response as a valid JSON object:
 
         scope = str(target_tool.get("scope", "unknown"))
 
-        # Check overall permissions
+        # Check overall permissions: require explicit True
         auth = self.orchestrator.permissions.is_authorized(scope)
-        if auth is False:
+        if auth is not True:
             return f"Security Error: Permission denied for scope '{scope}'."
 
-        # Implement a few example tools
+        # Helper: validate path is inside workspace and not a symlink
+        def _validate_path(p: str) -> (bool, str):
+            try:
+                if not p:
+                    return False, "Empty path"
+                workspace = Path(
+                    self.orchestrator.config.paths.get("workspaces", os.getcwd())
+                ).resolve()
+                candidate = Path(p)
+                # Resolve without following final symlink to detect symlinks
+                try:
+                    cand_resolved = candidate.resolve()
+                except RuntimeError:
+                    return False, "Path resolution error"
+
+                # Deny symlinks: ensure candidate is the same as resolved when strict
+                if candidate.is_symlink():
+                    return False, "Symlink paths are not allowed"
+
+                try:
+                    cand_resolved.relative_to(workspace)
+                except Exception:
+                    return False, "Path outside workspace"
+
+                return True, str(cand_resolved)
+            except Exception as e:
+                return False, f"Path validation error: {e}"
+
+        # Implement a few example tools with improved security
         try:
             if tool_name == "read_file":
                 path = str(tool_input.get("path", ""))
-                with open(path, "r") as f:
+                ok, info = _validate_path(path)
+                if not ok:
+                    return f"Security Error: read_file denied: {info}"
+
+                # Enforce read limit
+                resolved = info
+                size = os.path.getsize(resolved)
+                if size > self.READ_LIMIT:
+                    return f"Security Error: read_file denied: file too large ({size} bytes)"
+
+                with open(resolved, "r", encoding="utf-8", errors="replace") as f:
                     return f.read()
             elif tool_name == "write_file":
                 path = str(tool_input.get("path", ""))
                 content = str(tool_input.get("content", ""))
-                with open(path, "w") as f:
-                    f.write(content)
-                return f"File '{path}' written successfully."
+                ok, info = _validate_path(path)
+                if not ok:
+                    return f"Security Error: write_file denied: {info}"
+
+                # Atomic write: write to temp file in same dir then replace
+                resolved = Path(info)
+                parent_dir = resolved.parent
+                parent_dir.mkdir(parents=True, exist_ok=True)
+                fd, tmp_path = tempfile.mkstemp(dir=str(parent_dir))
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as tf:
+                        tf.write(content)
+                    os.replace(tmp_path, str(resolved))
+                except Exception as e:
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+                    return f"Tool execution error: {e}"
+
+                return f"File '{resolved}' written successfully."
             elif tool_name == "query_rag":
                 return await self.orchestrator.rag.navigate(
                     str(tool_input.get("query", ""))
