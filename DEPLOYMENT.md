@@ -110,7 +110,6 @@ docker-compose restart
 For multi-server, highly available deployments.
 
 ```bash
-# Apply Kubernetes manifests (coming soon)
 kubectl apply -f k8s/
 ```
 

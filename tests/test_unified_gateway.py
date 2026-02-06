@@ -9,6 +9,9 @@ from datetime import datetime
 
 from adapters.unified_gateway import ConnectionType, ClientConnection, UnifiedGateway
 
+# Ignore unawaited coroutine warnings for the health monitor loop in these tests
+pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning")
+
 
 class TestConnectionType:
     """Test ConnectionType enum"""

@@ -85,17 +85,18 @@ def get_container() -> DependencyContainer:
     return _container
 
 
-def inject(service_type: Type[T]) -> T:
+def inject(service_type: Type[T]) -> Callable:
     """Decorator to inject dependencies into functions/classes."""
 
     def decorator(func_or_class):
-        if hasattr(func_or_class, "__init__"):
+        if isinstance(func_or_class, type):
             # It's a class, inject into __init__
             original_init = func_or_class.__init__
 
             def injected_init(self, *args, **kwargs):
                 # Inject services before calling original __init__
-                for param_name, param_type in func_or_class.__annotations__.items():
+                annotations = getattr(func_or_class, "__annotations__", {})
+                for param_name, param_type in annotations.items():
                     if (
                         param_name != "return"
                         and param_name not in kwargs
@@ -113,7 +114,8 @@ def inject(service_type: Type[T]) -> T:
             # It's a function, inject into function call
             def injected_func(*args, **kwargs):
                 # Inject services
-                for param_name, param_type in func_or_class.__annotations__.items():
+                annotations = getattr(func_or_class, "__annotations__", {})
+                for param_name, param_type in annotations.items():
                     if param_name != "return" and param_name not in kwargs:
                         try:
                             kwargs[param_name] = _container.resolve(param_type)

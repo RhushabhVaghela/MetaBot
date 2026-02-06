@@ -16,7 +16,7 @@ class ComputerDriver:
 
             pyautogui.FAILSAFE = True
             return pyautogui
-        except (ImportError, Exception):
+        except (ImportError, Exception, SystemExit):
             # Mock for headless environments
             class MockPyAutoGUI:
                 FAILSAFE = True

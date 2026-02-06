@@ -85,6 +85,7 @@ class UnifiedGateway:
             ct.value: {} for ct in ConnectionType
         }
         self.logger = logging.getLogger(__name__)
+        self._health_task: Optional[asyncio.Task] = None
 
     async def start(self):
         await self._start_local_server()
@@ -95,7 +96,29 @@ class UnifiedGateway:
         if self.enable_direct_https:
             await self._start_https_server()
         # Fire-and-forget health monitor
-        asyncio.create_task(self._health_monitor_loop())
+        self._health_task = asyncio.create_task(self._health_monitor_loop())
+
+    async def stop(self):
+        """Stop all gateway services and cleanup tasks."""
+        if self._health_task:
+            self._health_task.cancel()
+            try:
+                await self._health_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.local_server:
+            self.local_server.close()
+            await self.local_server.wait_closed()
+
+        if self.cloudflare_process:
+            self.cloudflare_process.terminate()
+
+        if self.tailscale_process:
+            self.tailscale_process.terminate()
+
+        if self.https_server:
+            await self.https_server.cleanup()
 
     def get_connection_info(self) -> Dict[str, Any]:
         return {
