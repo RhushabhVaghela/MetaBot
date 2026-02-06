@@ -147,6 +147,9 @@ class HealthMonitor:
         self.orchestrator = orchestrator
         # Keep references to created tasks so they can be cancelled/awaited on shutdown
         self._tasks: List[asyncio.Task] = []
+        # Track last known status and restart counts for monitored components
+        self.last_status: Dict[str, Any] = {}
+        self.restart_counts: Dict[str, int] = {}
 
     async def shutdown(self):
         """Cancel and await any tasks started by BackgroundTasks."""
@@ -256,6 +259,8 @@ class BackgroundTasks:
 
     def __init__(self, orchestrator):
         self.orchestrator = orchestrator
+        # Track scheduled background tasks so they can be cancelled/awaited on shutdown
+        self._tasks: List[asyncio.Task] = []
 
     async def start_all_tasks(self):
         """Start all background tasks."""
