@@ -10,8 +10,27 @@ from pathlib import Path
 
 from core.agents import SubAgent
 import logging
+import json as _json
 
 logger = logging.getLogger("megabot.agent_coordinator")
+logger_audit = logging.getLogger("megabot.audit")
+
+
+def _audit(event: str, **data):
+    """Emit a structured JSON audit event to the `megabot.audit` logger.
+
+    This is best-effort and intentionally small: tests and production can
+    attach handlers to `megabot.audit` to route structured events to a file
+    or remote sink. We avoid configuring handlers here to not interfere with
+    test harness logging.
+    """
+    try:
+        payload = {"event": event, "timestamp": datetime.utcnow().isoformat() + "Z"}
+        payload.update(data)
+        logger_audit.info(_json.dumps(payload))
+    except Exception:
+        # Never raise from an audit path
+        logger.debug("Failed to emit audit event: %s", event)
 
 
 class AgentCoordinator:
@@ -40,9 +59,34 @@ class AgentCoordinator:
         role = str(tool_input.get("role", "Assistant"))
 
         # Create the agent but DO NOT register it globally until validation
-        # succeeds. This prevents callers from invoking tools on an
-        # unvalidated agent during the pre-flight phase.
-        agent = SubAgent(name, role, task, self.orchestrator)
+        # succeeds. Prefer any SubAgent class provided by the orchestrator
+        # (tests sometimes patch core.orchestrator.SubAgent). Fall back to
+        # the implementation imported from core.agents.
+        # Resolve SubAgent class from several possible places to respect
+        # test patches. Tests sometimes patch `core.orchestrator.SubAgent` or
+        # attach a `SubAgent` attribute to the orchestrator instance. Try in
+        # order: instance attribute, core.orchestrator module symbol, then
+        # fallback to the default imported SubAgent.
+        # Allow tests to patch the local module symbol `SubAgent` first
+        AgentCls = globals().get("SubAgent")
+        if AgentCls is None:
+            try:
+                AgentCls = getattr(self.orchestrator, "SubAgent", None)
+            except Exception:
+                AgentCls = None
+
+        if AgentCls is None:
+            try:
+                import core.orchestrator as _orch_mod
+
+                AgentCls = getattr(_orch_mod, "SubAgent", None)
+            except Exception:
+                AgentCls = None
+
+        if AgentCls is None:
+            AgentCls = SubAgent
+
+        agent = AgentCls(name, role, task, self.orchestrator)
 
         # 1. Pre-flight Check: Planning & Validation
         print(f"Sub-Agent {name}: Generating plan...")
@@ -55,18 +99,23 @@ class AgentCoordinator:
             messages=[{"role": "user", "content": validation_prompt}],
         )
         if "VALID" not in str(validation_res).upper():
-            # Ensure the agent is NOT registered if validation fails
-            if name in self.orchestrator.sub_agents:
-                try:
+            # Validation failed: ensure the agent is not registered and
+            # always return a blocking message. Tests expect a clear
+            # 'blocked by pre-flight' response regardless of registration.
+            try:
+                if name in self.orchestrator.sub_agents:
                     del self.orchestrator.sub_agents[name]
-                except Exception:
-                    pass
-                logger.warning(
-                    "Pre-flight validation blocked sub-agent %s: %s",
-                    name,
-                    validation_res,
-                )
-                return f"Sub-agent {name} blocked by pre-flight check: {validation_res}"
+            except Exception:
+                pass
+            logger.warning(
+                "Pre-flight validation blocked sub-agent %s: %s",
+                name,
+                validation_res,
+            )
+            _audit(
+                "sub_agent.preflight_blocked", agent=name, reason=str(validation_res)
+            )
+            return f"Sub-agent {name} blocked by pre-flight check: {validation_res}"
 
         # Register the validated agent as active
         try:
@@ -202,7 +251,7 @@ class AgentCoordinator:
             return f"Security Error: Permission denied for scope '{scope}'."
 
         # Helper: validate path is inside workspace and not a symlink
-        def _validate_path(p: str) -> (bool, str):
+        def _validate_path(p: str):
             try:
                 if not p:
                     return False, "Empty path"
@@ -269,6 +318,13 @@ class AgentCoordinator:
 
                 ok, info = _validate_path(path)
                 if not ok:
+                    logger.warning(
+                        "read_file denied: agent=%s path=%s reason=%s",
+                        agent_name,
+                        path,
+                        info,
+                    )
+                    _audit("read_file.denied", agent=agent_name, path=path, reason=info)
                     return f"Security Error: read_file denied: {info}"
 
                 # Enforce read limit and mitigate TOCTOU by using lstat and
@@ -292,6 +348,20 @@ class AgentCoordinator:
                     # supported, return a clear error rather than falling
                     # through to a potentially unsafe open.
                     if e.errno in (errno.ELOOP, errno.EPERM, errno.EACCES):
+                        logger.warning(
+                            "read_file os.open denied: agent=%s path=%s errno=%s err=%s",
+                            agent_name,
+                            resolved,
+                            e.errno,
+                            e,
+                        )
+                        _audit(
+                            "read_file.os_open_denied",
+                            agent=agent_name,
+                            path=resolved,
+                            errno=e.errno,
+                            err=str(e),
+                        )
                         return f"Security Error: read_file denied: possible symlink or permission error ({e})"
                     # Fallback to safe builtin open as last resort
                     try:
@@ -313,6 +383,14 @@ class AgentCoordinator:
                         or pre_stat.st_dev != post_stat.st_dev
                     ):
                         os.close(fd)
+                        logger.warning(
+                            "read_file TOCTOU detected: agent=%s path=%s",
+                            agent_name,
+                            resolved,
+                        )
+                        _audit(
+                            "read_file.toctou_detected", agent=agent_name, path=resolved
+                        )
                         return "Security Error: read_file denied: TOCTOU detected"
 
                     # enforce size limit
@@ -320,6 +398,18 @@ class AgentCoordinator:
                         size = post_stat.st_size
                         if size > self.READ_LIMIT:
                             os.close(fd)
+                            logger.warning(
+                                "read_file denied (too large): agent=%s path=%s size=%s",
+                                agent_name,
+                                resolved,
+                                size,
+                            )
+                            _audit(
+                                "read_file.too_large",
+                                agent=agent_name,
+                                path=resolved,
+                                size=size,
+                            )
                             return f"Security Error: read_file denied: file too large ({size} bytes)"
                     except Exception:
                         pass
@@ -347,12 +437,33 @@ class AgentCoordinator:
                         os.close(fd)
                     except Exception:
                         pass
+                    logger.warning(
+                        "read_file denied (exception): agent=%s path=%s err=%s",
+                        agent_name,
+                        resolved,
+                        e,
+                    )
+                    _audit(
+                        "read_file.exception",
+                        agent=agent_name,
+                        path=resolved,
+                        err=str(e),
+                    )
                     return f"Security Error: read_file denied: {e}"
             elif tool_name == "write_file":
                 path = str(tool_input.get("path", ""))
                 content = str(tool_input.get("content", ""))
                 ok, info = _validate_path(path)
                 if not ok:
+                    logger.warning(
+                        "write_file denied: agent=%s path=%s reason=%s",
+                        agent_name,
+                        path,
+                        info,
+                    )
+                    _audit(
+                        "write_file.denied", agent=agent_name, path=path, reason=info
+                    )
                     return f"Security Error: write_file denied: {info}"
 
                 # Atomic write: write to temp file in same dir then replace
@@ -381,6 +492,16 @@ class AgentCoordinator:
                                     os.unlink(tmp_path)
                                 except Exception:
                                     pass
+                                logger.warning(
+                                    "write_file denied (dest symlink): agent=%s path=%s",
+                                    agent_name,
+                                    resolved,
+                                )
+                                _audit(
+                                    "write_file.dest_symlink",
+                                    agent=agent_name,
+                                    path=str(resolved),
+                                )
                                 return "Security Error: write_file denied: destination is a symlink"
                         except Exception:
                             pass
@@ -394,6 +515,16 @@ class AgentCoordinator:
                                 os.unlink(tmp_path)
                             except Exception:
                                 pass
+                            logger.warning(
+                                "write_file TOCTOU detected: agent=%s path=%s",
+                                agent_name,
+                                resolved,
+                            )
+                            _audit(
+                                "write_file.toctou_detected",
+                                agent=agent_name,
+                                path=str(resolved),
+                            )
                             return "Security Error: write_file denied: TOCTOU detected"
 
                     # If checks pass, atomically replace
@@ -403,6 +534,18 @@ class AgentCoordinator:
                         os.unlink(tmp_path)
                     except Exception:
                         pass
+                    logger.error(
+                        "write_file failed: agent=%s path=%s err=%s",
+                        agent_name,
+                        resolved,
+                        e,
+                    )
+                    _audit(
+                        "write_file.exception",
+                        agent=agent_name,
+                        path=str(resolved),
+                        err=str(e),
+                    )
                     return f"Tool execution error: {e}"
 
                 return f"File '{resolved}' written successfully."

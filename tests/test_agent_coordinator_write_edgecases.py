@@ -30,6 +30,8 @@ async def test_write_file_dest_symlink(orchestrator, tmp_path):
     # Simulate post_stat reporting a symlink
     class FakeStat:
         st_mode = 0
+        st_ino = 123
+        st_dev = 1
 
     fake = FakeStat()
 
@@ -37,7 +39,15 @@ async def test_write_file_dest_symlink(orchestrator, tmp_path):
     orig_mkstemp = tempfile.mkstemp
 
     def fake_lstat(path):
-        return None if str(path).endswith("tmp") else fake
+        # Only spoof the destination path; delegate to original for other
+        # paths. This avoids interfering with Path.resolve() internals.
+        try:
+            if str(path) == str(dest):
+                return fake
+            return orig_lstat(path)
+        except Exception:
+            # If original lstat fails, fall back to None to mimic missing file
+            return None
 
     def fake_mkstemp(dir=None):
         # create a real tmp file and return fd, path
