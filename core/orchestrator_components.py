@@ -266,15 +266,20 @@ class BackgroundTasks:
         def _safe_schedule(coro):
             try:
                 t = asyncio.create_task(coro)
+                print(f"[BackgroundTasks] scheduled via create_task: {coro}")
                 return t
             except Exception:
                 try:
                     t = asyncio.ensure_future(coro)
+                    print(f"[BackgroundTasks] scheduled via ensure_future: {coro}")
                     return t
                 except Exception:
                     # If coro is a coroutine object, close it to avoid warnings.
                     try:
                         if hasattr(coro, "close"):
+                            print(
+                                f"[BackgroundTasks] closing coro in _safe_schedule: {coro}"
+                            )
                             coro.close()
                     except Exception:
                         pass
@@ -296,9 +301,18 @@ class BackgroundTasks:
                 # Nothing to schedule (tests may stub these to return None)
                 continue
 
+            print(f"[BackgroundTasks] attempting to schedule coro: {coro!r}")
             task = _safe_schedule(coro)
             if task is not None:
                 self._tasks.append(task)
+            else:
+                # Ensure coroutine is closed if scheduling failed to avoid warnings
+                try:
+                    if hasattr(coro, "close"):
+                        print(f"[BackgroundTasks] closing coro in main loop: {coro!r}")
+                        coro.close()
+                except Exception:
+                    pass
         # Health monitoring is started by the orchestrator itself to allow
         # finer control over restart sequencing and to avoid double-starting
         # during tests. BackgroundTasks is responsible only for internal
