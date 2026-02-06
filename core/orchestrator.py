@@ -1904,6 +1904,23 @@ class MegaBotOrchestrator:
                 # Defensive: some tests assign Mock/MagicMock which may raise on cancel
                 pass
 
+        # Shutdown background tasks started by BackgroundTasks (if present)
+        if hasattr(self, "background_tasks") and self.background_tasks:
+            try:
+                res = self.background_tasks.shutdown()
+                if (
+                    asyncio.iscoroutine(res)
+                    or asyncio.isfuture(res)
+                    or isinstance(res, asyncio.Task)
+                ):
+                    try:
+                        await res
+                    except Exception:
+                        pass
+            except Exception:
+                # Defensive: test doubles may raise on call; ignore
+                pass
+
             try:
                 cls_name = getattr(
                     self._health_task, "__class__", type(self._health_task)
