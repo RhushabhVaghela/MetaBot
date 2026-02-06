@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 import json
 import base64
 import uvicorn  # type: ignore
@@ -215,11 +216,23 @@ class MegaBotOrchestrator:
         # disk in deployed runs. This is gated by an opt-in environment
         # variable to avoid creating files during local tests unless desired.
         try:
-            if os.environ.get("MEGABOT_ENABLE_AUDIT_LOG", "").lower() in (
+            enable_env = os.environ.get("MEGABOT_ENABLE_AUDIT_LOG", "").lower() in (
                 "1",
                 "true",
                 "yes",
-            ):
+            )
+
+            # Auto-enable audit logging when not running in CI and when the
+            # process doesn't look like a pytest run. This keeps the behaviour
+            # convenient for local manual runs while avoiding creating files
+            # during CI or test executions unless explicitly requested.
+            is_ci = (
+                os.environ.get("CI") is not None
+                or os.environ.get("GITHUB_ACTIONS") is not None
+            )
+            looks_like_pytest = "pytest" in " ".join(sys.argv)
+
+            if enable_env or (not is_ci and not looks_like_pytest):
                 audit_path = self.config.paths.get("audit_log", "logs/audit.log")
                 attach_audit_file_handler(audit_path)
         except Exception:
