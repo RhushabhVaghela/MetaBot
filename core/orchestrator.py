@@ -58,6 +58,8 @@ from adapters.security.tirith_guard import guard as tirith
 # Import extracted components
 from core.orchestrator_components import MessageHandler, HealthMonitor, BackgroundTasks
 from core.admin_handler import AdminHandler
+from core.message_router import MessageRouter
+from core.agent_coordinator import AgentCoordinator
 
 
 # Constants
@@ -185,6 +187,8 @@ class MegaBotOrchestrator:
         self.admin_handler = AdminHandler(self)
         self.health_monitor = HealthMonitor(self)
         self.background_tasks = BackgroundTasks(self)
+        # Message routing helper (extracted to separate class)
+        self.message_router = MessageRouter(self)
 
         # Resolve other services
         self.computer_driver = resolve_service(ComputerDriver)
@@ -203,6 +207,8 @@ class MegaBotOrchestrator:
         )
         self.loki = LokiMode(self)
         self.clients = set()  # Track WebSocket clients
+        # AgentCoordinator centralizes sub-agent lifecycle and tool execution
+        self.agent_coordinator = AgentCoordinator(self)
 
         # Initialize High-Level Features
         from features.dash_data.agent import DashDataAgent
@@ -564,6 +570,16 @@ class MegaBotOrchestrator:
         # Start background tasks
         await self.background_tasks.start_all_tasks()
 
+        # Start central health monitor loop (BackgroundTasks avoids starting it
+        # to prevent double-start during tests; orchestrator is responsible
+        # for creating the monitor so restart sequencing is explicit).
+        try:
+            self._health_task = asyncio.create_task(
+                self.health_monitor.start_monitoring()
+            )
+        except Exception as e:
+            print(f"Warning: Failed to start health monitor task: {e}")
+
     async def restart_component(self, name: str):  # pragma: no cover
         """Attempt to re-initialize or reconnect a specific system component"""  # pragma: no cover
         print(f"Self-Healing: Restarting {name}...")  # pragma: no cover
@@ -728,35 +744,8 @@ class MegaBotOrchestrator:
     def _to_platform_message(
         self, message: Message, chat_id: Optional[str] = None
     ) -> Any:
-        """Convert core Message to PlatformMessage for native messaging"""
-        from adapters.messaging import MediaAttachment
-        import uuid
-
-        target_chat = chat_id or message.metadata.get("chat_id", "broadcast")
-
-        platform_attachments = []  # pragma: no cover
-        if hasattr(message, "attachments") and message.attachments:  # pragma: no cover
-            for att in message.attachments:  # pragma: no cover
-                try:  # pragma: no cover
-                    # Map 'type' if it's a string to MessageType enum  # pragma: no cover
-                    if isinstance(att.get("type"), str):  # pragma: no cover
-                        att["type"] = MessageType(att["type"]).value  # pragma: no cover
-                    platform_attachments.append(
-                        MediaAttachment.from_dict(att)
-                    )  # pragma: no cover
-                except Exception as e:
-                    print(f"Error converting attachment: {e}")
-
-        return PlatformMessage(
-            id=str(uuid.uuid4()),
-            platform="native",
-            sender_id="megabot-core",
-            sender_name=message.sender,
-            chat_id=target_chat,
-            content=message.content,
-            message_type=MessageType.TEXT,
-            attachments=platform_attachments,
-        )
+        """Delegate to MessageRouter to convert to PlatformMessage."""
+        return self.message_router._to_platform_message(message, chat_id)
 
     async def send_platform_message(
         self,
@@ -765,166 +754,9 @@ class MegaBotOrchestrator:
         platform: str = "native",
         target_client: Optional[str] = None,
     ):  # pragma: no cover
-        """Send a message to a platform and record it in history."""
-        target_chat = chat_id or message.metadata.get("chat_id", "broadcast")
-
-        # Visual Redaction Agent: Detect and blur sensitive areas before sending
-        if hasattr(message, "attachments") and message.attachments:
-            for att in message.attachments:
-                if str(att.get("type")).lower() == "image" and att.get("data"):
-                    print(f"Redaction-Agent: Scanning image for {target_chat}...")
-                    try:
-                        # 1. Analyze for sensitive regions
-                        analysis_raw = await self.computer_driver.execute(
-                            "analyze_image", text=att["data"]
-                        )
-                        analysis = json.loads(analysis_raw)
-                        regions = analysis.get("sensitive_regions", [])
-
-                        if regions:
-                            print(
-                                f"Redaction-Agent: Blurring {len(regions)} sensitive areas."
-                            )
-                            redacted_data = await self.computer_driver.execute(
-                                "blur_regions", text=att["data"], regions=regions
-                            )
-
-                            # 2. Verify Redaction
-                            if await self._verify_redaction(redacted_data):
-                                att["data"] = redacted_data
-                                att["metadata"] = att.get("metadata", {})
-                                att["metadata"]["redacted"] = True  # pragma: no cover
-                            else:  # pragma: no cover
-                                print(  # pragma: no cover
-                                    "Redaction-Agent: Verification FAILED. Blocking image."  # pragma: no cover
-                                )  # pragma: no cover
-                                att["content"] = (  # pragma: no cover
-                                    "[SECURITY BLOCK: Redaction verification failed]"  # pragma: no cover
-                                )  # pragma: no cover
-                                if "data" in att:  # pragma: no cover
-                                    del att["data"]  # pragma: no cover
-                        else:  # pragma: no cover
-                            # No sensitive regions detected in first pass  # pragma: no cover
-                            pass  # pragma: no cover
-                    except Exception as e:
-                        print(f"Redaction failed: {e}")
-
-        # Vision Policy Enforcement: Require approval for outbound images
-        has_images = any(
-            str(att.get("type")).lower() == "image"
-            for att in getattr(message, "attachments", [])
-        )
-
-        if has_images and platform != "websocket":  # Web UI usually has its own preview
-            auth = self.permissions.is_authorized("vision.outbound")  # pragma: no cover
-            if auth is False:  # pragma: no cover
-                print(f"Vision Policy: Outbound image blocked for {target_chat}")
-                return
-            if auth is None:  # ASK_EACH
-                # If it's already a security message, don't loop  # pragma: no cover
-                if message.sender == "Security":
-                    pass
-                else:
-                    print(
-                        f"Vision Policy: Queuing outbound image for approval in {target_chat}"
-                    )
-                    import uuid
-
-                    action = {
-                        "id": str(uuid.uuid4()),
-                        "type": "outbound_vision",
-                        "payload": {
-                            "message_content": message.content,
-                            "attachments": message.attachments,
-                            "chat_id": target_chat,
-                            "platform": platform,
-                            "target_client": target_client,
-                        },
-                        "description": f"Send image to {platform}:{target_chat}",
-                    }
-                    self.admin_handler.approval_queue.append(action)
-
-                    # Start Escalation Timer for Voice Call
-                    asyncio.create_task(self._start_approval_escalation(action))
-
-                    # Notify admins
-                    admin_resp = Message(
-                        content=f"⚠️ Vision Approval Required: Send image to {target_chat}\nType `!approve {action['id']}` to authorize.",
-                        sender="Security",
-                    )
-                    # Use a background task to avoid recursion depth if send_platform_message is called in a loop
-                    asyncio.create_task(
-                        self.send_platform_message(admin_resp, platform=platform)
-                    )
-                    return
-
-        # Granular Pruning: Tag architectural decisions to keep forever
-        metadata = message.metadata.copy()
-        if any(
-            keyword in message.content.upper()
-            for keyword in [
-                "DECISION",
-                "ARCHITECT",
-                "PATTERN",
-                "LEARNED LESSON",
-            ]  # pragma: no cover
-        ):
-            metadata["keep_forever"] = True
-
-        # Record in DB
-        await self.memory.chat_write(
-            chat_id=target_chat,
-            platform=platform,
-            role="assistant",
-            content=message.content,
-            metadata=metadata,
-        )
-
-        # Update cache  # pragma: no cover
-        if target_chat in self.message_handler.chat_contexts:  # pragma: no cover
-            self.message_handler.chat_contexts[target_chat].append(  # pragma: no cover
-                {"role": "assistant", "content": message.content}  # pragma: no cover
-            )
-            self.message_handler.chat_contexts[target_chat] = (
-                self.message_handler.chat_contexts[target_chat][-10:]
-            )
-
-        # Route to appropriate adapter  # pragma: no cover
-        if platform in [
-            "cloudflare",
-            "vpn",
-            "direct",
-            "local",
-            "gateway",
-        ]:  # pragma: no cover
-            if target_client:  # pragma: no cover
-                # Send back through Unified Gateway  # pragma: no cover
-                msg_payload = {  # pragma: no cover
-                    "type": "message",  # pragma: no cover
-                    "content": message.content,  # pragma: no cover
-                    "sender": message.sender,  # pragma: no cover
-                    "metadata": metadata,  # pragma: no cover
-                }  # pragma: no cover
-                await self.adapters["gateway"].send_message(
-                    target_client, msg_payload
-                )  # pragma: no cover
-            else:  # pragma: no cover
-                # Broadcast or generic?  # pragma: no cover
-                # For now, let's assume we want to send to the last active client if no target  # pragma: no cover
-                if (  # pragma: no cover
-                    self.last_active_chat  # pragma: no cover
-                    and self.last_active_chat["platform"]
-                    == platform  # pragma: no cover
-                ):
-                    await self.adapters["gateway"].send_message(
-                        self.last_active_chat["chat_id"],
-                        {"type": "message", "content": message.content},
-                    )
-
-        platform_msg = self._to_platform_message(message, chat_id=target_chat)
-        platform_msg.platform = platform
-        await self.adapters["messaging"].send_message(
-            platform_msg, target_client=target_client
+        """Delegate to MessageRouter for sending platform messages."""
+        return await self.message_router.send_platform_message(
+            message, chat_id=chat_id, platform=platform, target_client=target_client
         )
 
     async def _trigger_voice_briefing(
@@ -1377,186 +1209,16 @@ class MegaBotOrchestrator:
         )
 
     async def _spawn_sub_agent(self, tool_input: Dict) -> str:
-        """Spawn and orchestrate a sub-agent with Pre-flight Checks and Synthesis"""
-        name = str(tool_input.get("name", "unknown"))
-        task = str(tool_input.get("task", "unknown"))
-        role = str(tool_input.get("role", "Assistant"))
-
-        agent = SubAgent(name, role, task, self)
-        self.sub_agents[name] = agent
-
-        # 1. Pre-flight Check: Planning & Validation
-        print(f"Sub-Agent {name}: Generating plan...")
-        plan = await agent.generate_plan()
-
-        # Validate plan against project policies
-        validation_prompt = f"As a Master Security Agent, validate the following plan for task '{task}' by agent '{name}' ({role}):\n{plan}\n\nDoes this plan violate any security policies (e.g., unauthorized access, destructive commands)? Reply with 'VALID' or a description of the violation."
-        validation_res = await self.llm.generate(
-            context="Pre-flight Plan Validation",
-            messages=[{"role": "user", "content": validation_prompt}],
-        )
-        # pragma: no cover
-        if "VALID" not in str(validation_res).upper():
-            return f"Sub-agent {name} blocked by pre-flight check: {validation_res}"
-
-        # 2. Execution
-        print(f"Sub-Agent {name}: Execution started...")
-        raw_result = await agent.run()
-
-        # 3. Synthesis: Refine and integrate sub-agent findings
-        print(f"Sub-Agent {name}: Execution finished. Synthesizing results...")
-        synthesis_prompt = f"""
-Integrate and summarize the findings from sub-agent '{name}' for the task '{task}'.
-Raw Result: {raw_result}
-
-Your goal is to extract architectural patterns or hard-won lessons that should be remembered by the Master Agent for future tasks.
-
-Format your response as a valid JSON object:
-{{
-    "summary": "Brief overall summary for immediate use",
-    "findings": ["Specific technical detail 1", "Specific technical detail 2"],
-    "learned_lesson": "A high-priority architectural decision, constraint, or pattern (e.g. 'Always use X when doing Y because of Z'). Prefix with 'CRITICAL:' if it relates to security or failure.",
-    "next_steps": ["Step 1"]
-}}
-"""
-        synthesis_raw = await self.llm.generate(
-            context="Result Synthesis",
-            messages=[{"role": "user", "content": synthesis_prompt}],
-        )
-
-        # Parse synthesis and record lesson
-        try:
-            # Hardened JSON extraction
-            lesson = "No lesson recorded."
-            summary = str(synthesis_raw)
-            print(f"DEBUG [Synthesis Raw]: {summary[:200]}")
-
-            # Try to find JSON block
-            json_match = re.search(r"\{.*\}", summary, re.DOTALL)  # pragma: no cover
-            if json_match:  # pragma: no cover
-                try:  # pragma: no cover
-                    synthesis_data = json.loads(json_match.group(0))  # pragma: no cover
-                    lesson = synthesis_data.get(
-                        "learned_lesson", lesson
-                    )  # pragma: no cover
-                    summary = synthesis_data.get("summary", summary)  # pragma: no cover
-                except Exception as e:  # pragma: no cover
-                    print(
-                        f"DEBUG [Synthesis JSON Parse Error]: {e}"
-                    )  # pragma: no cover
-                    # Fallback: regex search for learned_lesson field if JSON parse fails  # pragma: no cover
-                    lesson_match = re.search(  # pragma: no cover
-                        r'"learned_lesson":\s*"(.*?)"',
-                        summary,
-                        re.DOTALL,  # pragma: no cover
-                    )  # pragma: no cover
-                    if lesson_match:
-                        lesson = lesson_match.group(1)
-            else:
-                # Direct fallback: Look for "lesson:" or "CRITICAL:" in raw text
-                fallback_match = re.search(
-                    r"(?:learned_lesson|lesson|CRITICAL):?\s*(.*)",
-                    str(synthesis_raw),
-                    re.IGNORECASE,
-                )  # pragma: no cover
-                if fallback_match:
-                    lesson = fallback_match.group(1).strip()
-
-            await self.memory.memory_write(
-                key=f"lesson_{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                type="learned_lesson",
-                content=lesson,
-                tags=["synthesis", name, role],
-            )
-            # pragma: no cover
-            # Proactively notify UI of new memory  # pragma: no cover
-            for client in list(self.clients):  # pragma: no cover
-                await client.send_json(  # pragma: no cover
-                    {
-                        "type": "memory_update",
-                        "content": lesson,
-                        "source": name,
-                    }  # pragma: no cover
-                )  # pragma: no cover
-
-            return summary
-        except Exception as e:
-            print(f"Failed to record memory lesson or parse synthesis: {e}")
-            return str(synthesis_raw)
+        """Delegate sub-agent spawning to AgentCoordinator (keeps API stable)."""
+        return await self.agent_coordinator._spawn_sub_agent(tool_input)
 
     async def _execute_tool_for_sub_agent(
         self, agent_name: str, tool_call: Dict
     ) -> str:
-        """Execute a tool on behalf of a sub-agent with Domain Boundary enforcement"""
-        agent = self.sub_agents.get(agent_name)  # pragma: no cover
-        if not agent:
-            return "Error: Agent not found."
-
-        tool_name = str(tool_call.get("name", "unknown"))
-        tool_input = tool_call.get("input", {})
-
-        # Enforce Domain Boundaries
-        allowed_tools = agent._get_sub_tools()
-        target_tool = next((t for t in allowed_tools if t["name"] == tool_name), None)
-        # pragma: no cover
-        if not target_tool:
-            return f"Security Error: Tool '{tool_name}' is outside the domain boundaries for role '{agent.role}'."
-
-        scope = str(target_tool.get("scope", "unknown"))
-
-        # Check overall permissions
-        auth = self.permissions.is_authorized(scope)  # pragma: no cover
-        if auth is False:
-            return f"Security Error: Permission denied for scope '{scope}'."
-
-        # Actual implementation of sub-tools
-        try:
-            if tool_name == "read_file":
-                path = str(tool_input.get("path", ""))
-                with open(path, "r") as f:  # pragma: no cover
-                    return f.read()  # pragma: no cover
-            elif tool_name == "write_file":  # pragma: no cover
-                path = str(tool_input.get("path", ""))  # pragma: no cover
-                content = str(tool_input.get("content", ""))  # pragma: no cover
-                with open(path, "w") as f:  # pragma: no cover
-                    f.write(content)  # pragma: no cover
-                return f"File '{path}' written successfully."  # pragma: no cover
-            elif tool_name == "run_test":  # pragma: no cover
-                import subprocess  # pragma: no cover
-
-                # pragma: no cover
-                cmd = str(tool_input.get("command", ""))  # pragma: no cover
-                result = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True
-                )  # pragma: no cover
-                return f"Exit Code: {result.returncode}\nOutput: {result.stdout}\nError: {result.stderr}"  # pragma: no cover
-            elif tool_name == "query_rag":  # pragma: no cover
-                return await self.rag.navigate(
-                    str(tool_input.get("query", ""))
-                )  # pragma: no cover
-            elif tool_name == "analyze_data":  # pragma: no cover
-                dataset_name = str(
-                    tool_input.get("dataset_name", "")
-                )  # pragma: no cover
-                query = str(tool_input.get("query", ""))  # pragma: no cover
-                code = tool_input.get("python_code")  # pragma: no cover
-                # pragma: no cover
-                agent = self.features.get("dash_data")  # pragma: no cover
-                if not agent:  # pragma: no cover
-                    return (
-                        "Error: Data Analysis feature not enabled."  # pragma: no cover
-                    )
-                # pragma: no cover
-                if code:  # pragma: no cover
-                    return await agent.execute_python_analysis(
-                        dataset_name, code
-                    )  # pragma: no cover
-                else:  # pragma: no cover
-                    return await agent.analyze(dataset_name, query)  # pragma: no cover
-        except Exception as e:  # pragma: no cover
-            return f"Tool Execution Error: {str(e)}"  # pragma: no cover
-
-        return f"Error: Tool '{tool_name}' logic not implemented."
+        """Delegate sub-agent tool execution to AgentCoordinator (keeps API stable)."""
+        return await self.agent_coordinator._execute_tool_for_sub_agent(
+            agent_name, tool_call
+        )
 
     async def _handle_computer_tool(
         self,

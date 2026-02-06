@@ -102,10 +102,27 @@ class UnifiedGateway:
         """Stop all gateway services and cleanup tasks."""
         # Cancel health task first
         if self._health_task:
-            self._health_task.cancel()
             try:
-                await self._health_task
-            except (asyncio.CancelledError, Exception):
+                self._health_task.cancel()
+            except Exception:
+                # Defensive: some tests assign MagicMocks which may raise on cancel
+                pass
+
+            # Only await real asyncio Tasks or Futures. Tests sometimes attach
+            # MagicMock objects with a __await__ pointing to a coroutine which
+            # should not be awaited here (it causes "coroutine was never awaited"
+            # runtime warnings). Guarding avoids awaiting those test doubles.
+            try:
+                if isinstance(self._health_task, asyncio.Task) or asyncio.isfuture(
+                    self._health_task
+                ):
+                    try:
+                        await self._health_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+            except Exception:
+                # If isinstance/isfuture check itself fails due to a mocked type,
+                # just skip awaiting to avoid test-time warnings.
                 pass
 
         # Close client websockets

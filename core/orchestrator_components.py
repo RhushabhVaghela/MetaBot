@@ -239,7 +239,10 @@ class BackgroundTasks:
         asyncio.create_task(self.proactive_loop())
         asyncio.create_task(self.pruning_loop())
         asyncio.create_task(self.backup_loop())
-        asyncio.create_task(self.orchestrator.health_monitor.start_monitoring())
+        # Health monitoring is started by the orchestrator itself to allow
+        # finer control over restart sequencing and to avoid double-starting
+        # during tests. BackgroundTasks is responsible only for internal
+        # periodic loops.
 
     async def sync_loop(self):
         """Synchronization loop for cross-platform data sync."""

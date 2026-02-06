@@ -132,27 +132,7 @@ Run `openclaw doctor` to surface risky/misconfigured DM policies.
 
 [![Star History Chart](https://api.star-history.com/svg?repos=openclaw/openclaw&type=date&legend=top-left)](https://www.star-history.com/#openclaw/openclaw&type=date&legend=top-left)
 
-## MegaBot Integration & Unified LLM Provider
-
-MegaBot now features a **Unified LLM Provider Interface** that seamlessly integrates with OpenClaw. This allows you to swap between local and cloud-based models with zero code changes.
-
-- **Supported Providers:** Ollama (Local), OpenAI, and Anthropic.
-- **Anthropic Computer Use:** Built-in support for Claude 3.5 Sonnet's "Computer Use" tool, allowing the AI to interact with the host system via a secure **Approval Interlock**.
-- **Performance:** Verified low-latency orchestrator processing (~0.5ms per message) and high-concurrency support (>35,000 msg/s throughput).
-
-### Benchmarking Metrics
-| Metric | Result |
-| --- | --- |
-| Core Processing Latency | ~0.38ms |
-| Security Policy Check | <0.01ms |
-| Concurrent Message Throughput | ~36,000 msg/s |
-
-### Quick Setup (LLM)
-Update your `mega-config.yaml` or set environment variables:
-```bash
-export OPENCLAW_AUTH_TOKEN="your_token"
-export ANTHROPIC_API_KEY="your_api_key" # For Claude 3.5 Sonnet
-```
+## Everything we built so far
 
 ### Core platform
 
