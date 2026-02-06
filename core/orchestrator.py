@@ -103,8 +103,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown (if needed)
-    pass
+    # Shutdown
+    if orchestrator:
+        await orchestrator.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1895,6 +1896,40 @@ Format your response as a valid JSON object:
             print(f"WebSocket error: {e}")
         finally:
             self.clients.discard(websocket)
+
+    async def shutdown(self):
+        """Gracefully shutdown the orchestrator and all adapters."""
+        print("[MegaBot] Shutting down orchestrator...")
+
+        # Shutdown all adapters
+        for name, adapter in self.adapters.items():
+            try:
+                if hasattr(adapter, "shutdown"):
+                    await adapter.shutdown()
+                    print(f"[MegaBot] Adapter '{name}' shutdown complete")
+                elif hasattr(adapter, "close"):
+                    await adapter.close()
+                    print(f"[MegaBot] Adapter '{name}' closed")
+            except Exception as e:
+                print(f"[MegaBot] Error shutting down adapter '{name}': {e}")
+
+        # Stop health monitoring
+        if hasattr(self, "health_monitor") and self.health_monitor:
+            try:
+                await self.health_monitor.stop()
+                print("[MegaBot] Health monitor stopped")
+            except Exception as e:
+                print(f"[MegaBot] Error stopping health monitor: {e}")
+
+        # Close all WebSocket connections
+        for client in list(self.clients):
+            try:
+                await client.close()
+            except Exception:
+                pass
+        self.clients.clear()
+
+        print("[MegaBot] Orchestrator shutdown complete")
 
 
 @app.post("/ivr")

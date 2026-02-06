@@ -306,10 +306,99 @@ class AdminHandler:
             print(f"❌ Action rejected: {action['description']}")
 
     async def _execute_approved_action(self, action: Dict):
-        """Execute an approved action."""
-        # Implementation would depend on action type
-        # For now, just log it
-        print(f"Executing approved action: {action}")
+        """Execute an approved action based on its type."""
+        action_type = action.get("type", "")
+        payload = action.get("payload", {})
+
+        print(f"🔧 Executing approved action: {action.get('description', action_type)}")
+
+        try:
+            if action_type == "system_command":
+                # Execute shell command
+                import subprocess
+
+                command = payload.get("params", {}).get("command", "")
+                if command:
+                    result = subprocess.run(
+                        command, shell=True, capture_output=True, text=True, timeout=30
+                    )
+                    output = result.stdout if result.returncode == 0 else result.stderr
+                    print(f"✅ Command executed:\n{output}")
+
+                    # Send result back via WebSocket if available
+                    websocket = action.get("websocket")
+                    if websocket:
+                        await websocket.send_json(
+                            {
+                                "type": "command_result",
+                                "command": command,
+                                "output": output,
+                                "success": result.returncode == 0,
+                            }
+                        )
+                    return output
+
+            elif action_type == "mcp_tool":
+                # Execute MCP tool
+                server = payload.get("server")
+                tool = payload.get("tool")
+                params = payload.get("params", {})
+
+                if (
+                    hasattr(self.orchestrator, "adapters")
+                    and "mcp" in self.orchestrator.adapters
+                ):
+                    result = await self.orchestrator.adapters["mcp"].call_tool(
+                        server, tool, params
+                    )
+                    print(f"✅ MCP tool executed: {result}")
+                    return result
+
+            elif action_type == "file_operation":
+                # File read/write operations
+                operation = payload.get("operation")
+                file_path = payload.get("path")
+                content = payload.get("content")
+
+                if operation == "read":
+                    with open(file_path, "r") as f:
+                        return f.read()
+                elif operation == "write":
+                    with open(file_path, "w") as f:
+                        f.write(content)
+                    return f"File written: {file_path}"
+
+            else:
+                # Generic action - try to route through OpenClaw if available
+                if (
+                    hasattr(self.orchestrator, "adapters")
+                    and "openclaw" in self.orchestrator.adapters
+                ):
+                    method = payload.get("method", "")
+                    params = payload.get("params", {})
+                    result = await self.orchestrator.adapters["openclaw"].execute_tool(
+                        method, params
+                    )
+                    print(f"✅ Action executed via OpenClaw: {result}")
+                    return result
+                else:
+                    print(f"⚠️ Unknown action type: {action_type}")
+
+        except Exception as e:
+            error_msg = f"❌ Action execution failed: {e}"
+            print(error_msg)
+
+            # Send error back via WebSocket if available
+            websocket = action.get("websocket")
+            if websocket:
+                await websocket.send_json(
+                    {
+                        "type": "action_error",
+                        "error": str(e),
+                        "action": action.get("description", "Unknown"),
+                    }
+                )
+            return error_msg
 
     async def _trigger_voice_briefing(self, phone: str, chat_id: str, platform: str):
         """Generate a summary of recent events and call the admin to read it"""

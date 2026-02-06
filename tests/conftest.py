@@ -1,8 +1,13 @@
 import pytest
 import yaml
 import sys
+import os
 from unittest.mock import MagicMock
-from core.config import Config, SystemConfig, AdapterConfig
+from core.config import Config, SystemConfig, AdapterConfig, SecurityConfig
+
+# Set test environment variables before any imports
+os.environ["MEGABOT_ENCRYPTION_SALT"] = "test-salt-minimum-16-chars"
+os.environ["MEGABOT_BACKUP_KEY"] = "test-backup-key-32-chars-long-string"
 
 # Global mocking for firebase_admin to prevent import errors in tests
 sys.modules["firebase_admin"] = MagicMock()
@@ -40,6 +45,10 @@ def mock_config():
             "mcp": AdapterConfig(servers=[]),
         },
         paths={"external_repos": "/tmp/mock_repos"},
+        security=SecurityConfig(
+            megabot_encryption_salt="test-salt-minimum-16-chars",
+            megabot_backup_key="test-backup-key-32-chars-long-string",
+        ),
     )
 
 
@@ -59,8 +68,12 @@ def temp_config_file(tmp_path):
         },
         "paths": {"external_repos": "/tmp/mock_repos"},
         "llm_profiles": {},
+        "security": {
+            "megabot_encryption_salt": "test-salt-minimum-16-chars",
+            "megabot_backup_key": "test-backup-key-32-chars-long-string",
+        },
     }
-    config_file = tmp_path / "meta-config.yaml"
+    config_file = tmp_path / "test-config.yaml"
     with open(config_file, "w") as f:
         yaml.dump(config_data, f)
     return str(config_file)

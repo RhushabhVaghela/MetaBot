@@ -245,8 +245,34 @@ class BackgroundTasks:
         """Synchronization loop for cross-platform data sync."""
         while True:
             try:
-                print("Sync Loop: Checking for updates...")
-                # Sync logic would go here
+                print("Sync Loop: Synchronizing user identities across platforms...")
+
+                # Sync user identities and link platform accounts
+                if hasattr(self.orchestrator, "user_identity"):
+                    try:
+                        # Trigger any pending identity sync operations
+                        await self.orchestrator.user_identity.sync_pending_identities()
+                        print("Sync Loop: User identities synchronized")
+                    except Exception as e:
+                        print(f"Sync Loop: Identity sync error: {e}")
+
+                # Sync chat memory across platforms for linked users
+                if hasattr(self.orchestrator, "chat_memory"):
+                    try:
+                        # Consolidate cross-platform conversations for linked users
+                        await self.orchestrator.chat_memory.sync_cross_platform_chats()
+                        print("Sync Loop: Chat memory synchronized")
+                    except Exception as e:
+                        print(f"Sync Loop: Chat memory sync error: {e}")
+
+                # Update knowledge memory stats
+                if hasattr(self.orchestrator, "knowledge_memory"):
+                    try:
+                        stats = await self.orchestrator.knowledge_memory.get_stats()
+                        print(f"Sync Loop: Knowledge memory stats - {stats}")
+                    except Exception as e:
+                        print(f"Sync Loop: Knowledge memory error: {e}")
+
                 await asyncio.sleep(300)  # Every 5 minutes
             except Exception as e:
                 print(f"Sync loop error: {e}")

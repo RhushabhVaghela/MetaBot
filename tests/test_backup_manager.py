@@ -85,8 +85,10 @@ async def test_create_backup_success(backup_manager, temp_db):
 
 
 @pytest.mark.asyncio
-async def test_create_backup_no_key(backup_manager):
+async def test_create_backup_no_key(backup_manager, monkeypatch):
     """Test backup creation without encryption key."""
+    # Temporarily clear the backup key from environment
+    monkeypatch.delenv("MEGABOT_BACKUP_KEY", raising=False)
     result = await backup_manager.create_backup()
     assert "Error: No encryption key provided" in result
 
@@ -144,8 +146,10 @@ async def test_restore_backup_success(backup_manager, temp_db):
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_no_key(backup_manager):
+async def test_restore_backup_no_key(backup_manager, monkeypatch):
     """Test restore without encryption key."""
+    # Temporarily clear the backup key from environment
+    monkeypatch.delenv("MEGABOT_BACKUP_KEY", raising=False)
     result = await backup_manager.restore_backup("test.enc")
     assert "Error: No encryption key provided" in result
 

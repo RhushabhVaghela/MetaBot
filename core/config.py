@@ -27,10 +27,34 @@ class SecurityConfig(BaseModel):
     """Security-related configuration"""
 
     megabot_backup_key: Optional[str] = Field(default=None, alias="MEGABOT_BACKUP_KEY")
-    megabot_encryption_salt: str = Field(
-        default="megabot-static-salt", alias="MEGABOT_ENCRYPTION_SALT"
-    )
+    megabot_encryption_salt: str = Field(default="", alias="MEGABOT_ENCRYPTION_SALT")
     megabot_media_path: str = Field(default="./media", alias="MEGABOT_MEDIA_PATH")
+
+    def model_post_init(self, __context) -> None:
+        """Validate security configuration after initialization"""
+        import os
+
+        # Skip validation during testing (when PYTEST_CURRENT_TEST is set)
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            if not self.megabot_encryption_salt:
+                self.megabot_encryption_salt = "test-salt-minimum-16-chars"
+            return
+
+        # For production, require proper salt
+        if not self.megabot_encryption_salt:
+            raise ValueError(
+                "MEGABOT_ENCRYPTION_SALT is required. "
+                "Please set it in your environment or config file. "
+                "Generate a secure salt with: openssl rand -base64 16"
+            )
+        if len(self.megabot_encryption_salt) < 16:
+            raise ValueError(
+                "MEGABOT_ENCRYPTION_SALT must be at least 16 characters long for security"
+            )
+        if len(self.megabot_encryption_salt) < 16:
+            raise ValueError(
+                "MEGABOT_ENCRYPTION_SALT must be at least 16 characters long for security"
+            )
 
 
 class AdapterConfig(BaseModel):

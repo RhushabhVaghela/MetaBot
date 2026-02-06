@@ -5,9 +5,14 @@ from typing import Dict, List
 class HealthMonitor:
     def __init__(self):
         self.status: Dict[str, bool] = {}
+        self._running = True
 
     def update(self, key: str, is_healthy: bool):
         self.status[key] = is_healthy
+
+    async def stop(self):
+        """Stop the health monitor."""
+        self._running = False
 
 
 class RateLimiter:

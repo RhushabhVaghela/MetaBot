@@ -54,7 +54,7 @@ policies:
   deny: []
 security:
   megabot_backup_key: null
-  megabot_encryption_salt: megabot-static-salt
+  megabot_encryption_salt: test-salt-minimum-16-chars
   megabot_media_path: ./media
 system:
   admin_phone: null

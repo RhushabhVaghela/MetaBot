@@ -64,7 +64,7 @@ class KnowledgeMemoryManager:
             logger.error(f"Error writing memory: {e}")
             return f"Error writing memory: {e}"
 
-    def _sync_write(self, key: str, type: str, content: str, tags_json: str):
+    def _sync_write(self, key: str, type: str, content: str, tags_json: str) -> str:
         """Synchronous write operation."""
         conn = self._get_connection()
         conn.execute(
@@ -75,6 +75,7 @@ class KnowledgeMemoryManager:
             (key, type, content, tags_json),
         )
         conn.commit()
+        return "Memory written successfully"
 
     async def read(self, key: str) -> Optional[Dict[str, Any]]:
         """Retrieve specific memory content by key."""
