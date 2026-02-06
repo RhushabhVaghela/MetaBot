@@ -9,6 +9,9 @@ from typing import Dict, Any
 from pathlib import Path
 
 from core.agents import SubAgent
+import logging
+
+logger = logging.getLogger("megabot.agent_coordinator")
 
 
 class AgentCoordinator:
@@ -58,7 +61,12 @@ class AgentCoordinator:
                     del self.orchestrator.sub_agents[name]
                 except Exception:
                     pass
-            return f"Sub-agent {name} blocked by pre-flight check: {validation_res}"
+                logger.warning(
+                    "Pre-flight validation blocked sub-agent %s: %s",
+                    name,
+                    validation_res,
+                )
+                return f"Sub-agent {name} blocked by pre-flight check: {validation_res}"
 
         # Register the validated agent as active
         try:
@@ -119,12 +127,18 @@ class AgentCoordinator:
                 # Direct fallback: Look for "lesson:" or "CRITICAL:" in raw text
                 pass
 
-            await self.orchestrator.memory.memory_write(
-                key=f"lesson_{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                type="learned_lesson",
-                content=lesson,
-                tags=["synthesis", name, role],
-            )
+            # Record lesson in memory with structured metadata; errors are logged.
+            try:
+                await self.orchestrator.memory.memory_write(
+                    key=f"lesson_{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    type="learned_lesson",
+                    content=lesson,
+                    tags=["synthesis", name, role],
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to write synthesis lesson to memory for %s: %s", name, e
+                )
 
             # Notify connected clients (best-effort)
             try:
@@ -136,8 +150,10 @@ class AgentCoordinator:
                             "source": name,
                         }
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    "Failed to notify clients about memory update for %s: %s", name, e
+                )
 
             return summary
         except Exception as e:
@@ -177,6 +193,12 @@ class AgentCoordinator:
         # Check overall permissions: require explicit True
         auth = self.orchestrator.permissions.is_authorized(scope)
         if auth is not True:
+            logger.info(
+                "Permission check denied for agent %s scope %s (is_authorized returned: %s)",
+                agent_name,
+                scope,
+                auth,
+            )
             return f"Security Error: Permission denied for scope '{scope}'."
 
         # Helper: validate path is inside workspace and not a symlink
@@ -225,9 +247,9 @@ class AgentCoordinator:
                 return None
 
         # Implement a few example tools with improved security
-            try:
-                if tool_name == "read_file":
-                    path = str(tool_input.get("path", ""))
+        try:
+            if tool_name == "read_file":
+                path = str(tool_input.get("path", ""))
 
                 # If a relative path is supplied, try opening it as-is first.
                 # Tests often patch builtins.open for a relative path; attempting
@@ -273,7 +295,9 @@ class AgentCoordinator:
                         return f"Security Error: read_file denied: possible symlink or permission error ({e})"
                     # Fallback to safe builtin open as last resort
                     try:
-                        with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                        with open(
+                            resolved, "r", encoding="utf-8", errors="replace"
+                        ) as f:
                             data = f.read()
                             if len(data.encode("utf-8")) > self.READ_LIMIT:
                                 return f"Security Error: read_file denied: file too large ({len(data.encode('utf-8'))} bytes)"
@@ -302,7 +326,9 @@ class AgentCoordinator:
 
                     # Read file content
                     chunks = []
-                    remaining = post_stat.st_size if hasattr(post_stat, "st_size") else None
+                    remaining = (
+                        post_stat.st_size if hasattr(post_stat, "st_size") else None
+                    )
                     # Read in chunks to avoid large allocations
                     while True:
                         chunk = os.read(fd, 64 * 1024)

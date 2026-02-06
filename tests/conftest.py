@@ -9,6 +9,7 @@ os.environ["MEGABOT_BACKUP_KEY"] = "test-backup-key-32-chars-long-string"
 import pytest
 import yaml
 from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 # Ensure the project root is on sys.path so `core` package is importable when
 # tests are executed from different working directories or isolation layers.
@@ -96,3 +97,19 @@ def orchestrator(mock_config):
 
     orch = MegaBotOrchestrator(mock_config)
     return orch
+
+
+@pytest.fixture
+def active_mock_agent():
+    """Return a MagicMock configured as an active sub-agent for tests.
+
+    Usage: pass `active_mock_agent` into tests that need a mock agent with
+    `_active = True` already set to match the stricter activation policy.
+    """
+    m = MagicMock()
+    # Most tests expect the agent to have a role attribute
+    m.role = "Tester"
+    m._active = True
+    # default stub for allowed tools
+    m._get_sub_tools.return_value = []
+    return m
