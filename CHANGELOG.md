@@ -1,5 +1,13 @@
-## refactor: finalize unified gateway and messaging imports
-- Added `core/network/` gateway stack (gateway, monitor, server, tunnel) with connection detection, health monitoring, rate limiting, and fallback across Cloudflare, VPN, direct HTTPS, and local websocket.
-- Introduced `adapters/unified_gateway.py` shim re-exporting gateway classes and `datetime` for test patching.
-- Messaging now enters via `adapters/messaging/__main__.py`; orchestrator imports `PlatformMessage`/`MessageType` from `adapters.messaging`; removed legacy `megabot_messaging` monolith references.
-- Tests updated: `PYTHONPATH=. pytest tests/test_unified_gateway.py tests/test_megabot_messaging.py` (passing).
+## Unreleased
+
+- AGC-001: Pre-flight validation for sub-agent spawn — sub-agents are blocked until validation returns an explicit approval. Prevents accidental execution of dangerous plans.
+- AGC-002: Strict permission checks — `permissions.is_authorized(...)` must return the boolean `True` (truthy values are rejected).
+- AGC-003: Secure filesystem tools — `read_file` and `write_file` now enforce workspace confinement, deny symlinks, enforce read size limit (1MB), and use atomic writes.
+
+Changes
+- Introduced `core/agent_coordinator.py` hardening: safe spawn flow, secure file ops, synthesis-to-memory with defensive parsing.
+- Defensive scheduling in `core/orchestrator_components.py`: initialize task store, defensive start/shutdown wrappers to avoid unawaited coroutine warnings.
+- Tests updated to reflect stricter `_active` requirement for MagicMock agents. Test harness warnings fixed by closing prepared coroutines in scheduling-failure test.
+
+Testing
+- Full test suite: `pytest -q` — 1369 passed, 0 warnings (local run after changes).
