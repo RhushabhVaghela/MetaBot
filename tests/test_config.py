@@ -90,3 +90,23 @@ def test_populate_from_environment(tmp_path, monkeypatch):
     assert config.llm.openai_api_key == "test_openai_key"
     assert config.llm.anthropic_api_key == "test_anthropic_key"
     assert config.security.megabot_backup_key == "test_backup_key"
+
+
+def test_load_api_credentials(tmp_path, monkeypatch):
+    import os
+
+    # Create a dummy api-credentials.py in tmp_path
+    cred_file = tmp_path / "api-credentials.py"
+    cred_file.write_text(
+        "TEST_KEY = 'test-value'\nAUTHORIZED_ADMINS = ['user1', 'user2']\n"
+    )
+
+    # Change current working directory to tmp_path
+    monkeypatch.chdir(tmp_path)
+
+    from core.config import load_api_credentials
+
+    load_api_credentials()
+
+    assert os.environ.get("TEST_KEY") == "test-value"
+    assert os.environ.get("AUTHORIZED_ADMINS") == "user1,user2"
