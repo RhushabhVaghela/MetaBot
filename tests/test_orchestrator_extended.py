@@ -153,6 +153,8 @@ async def test_execute_tool_for_sub_agent_paths(orchestrator):
 
     # Setup mock agent
     mock_agent = MagicMock()
+    # Tests must mark mock agents active under the stricter activation policy
+    mock_agent._active = True
     mock_agent.role = "Senior Dev"
     orchestrator.sub_agents = {"agent1": mock_agent}
 

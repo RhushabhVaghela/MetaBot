@@ -69,6 +69,8 @@ async def test_execute_tool_for_sub_agent_paths(orchestrator):
     # 2. Tool not allowed
     mock_agent = MagicMock()
     mock_agent.role = "tester"
+    # New stricter activation policy: tests must mark mock agents as active
+    mock_agent._active = True
     mock_agent._get_sub_tools.return_value = [{"name": "read_file", "scope": "fs"}]
     orch.sub_agents = {"agent1": mock_agent}
     res = await coord._execute_tool_for_sub_agent("agent1", {"name": "forbidden"})

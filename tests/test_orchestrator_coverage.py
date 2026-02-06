@@ -93,6 +93,8 @@ async def test_orchestrator_tool_handling(mock_config):
         orch.permissions.is_authorized.return_value = True
 
         mock_agent = MagicMock()
+        # Respect stricter activation policy in AgentCoordinator
+        mock_agent._active = True
         mock_agent._get_sub_tools.return_value = [{"name": "read_file", "scope": "fs"}]
         mock_agent.role = "tester"
         orch.sub_agents["agent1"] = mock_agent
